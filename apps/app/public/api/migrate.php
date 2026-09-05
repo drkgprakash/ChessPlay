@@ -150,9 +150,85 @@ if ($action === 'seed_auth' || $action === 'migrate') {
             $seededCount++;
         }
 
+        // 3. Real-Time Classroom Schema
+        $pdo->exec("
+        CREATE TABLE IF NOT EXISTS classroom_sessions (
+            id VARCHAR(36) PRIMARY KEY,
+            batch_id VARCHAR(36) NOT NULL,
+            academy_id VARCHAR(36) NOT NULL,
+            coach_id VARCHAR(36) NOT NULL,
+            title VARCHAR(150) NOT NULL DEFAULT 'Advanced Tactics & Strategy — Batch Alpha',
+            master_fen VARCHAR(150) NOT NULL DEFAULT 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+            is_locked BOOLEAN DEFAULT FALSE,
+            active_arrows JSON NULL,
+            status ENUM('active', 'ended') DEFAULT 'active',
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+        CREATE TABLE IF NOT EXISTS classroom_events (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            session_id VARCHAR(36) NOT NULL,
+            batch_id VARCHAR(36) NOT NULL,
+            user_id VARCHAR(36) NOT NULL,
+            user_name VARCHAR(100) NOT NULL,
+            user_role VARCHAR(30) NOT NULL,
+            event_type VARCHAR(50) NOT NULL,
+            payload JSON NOT NULL,
+            created_at TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP(3),
+            INDEX idx_batch_id (batch_id, id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+        CREATE TABLE IF NOT EXISTS student_board_states (
+            id VARCHAR(36) PRIMARY KEY,
+            session_id VARCHAR(36) NOT NULL,
+            student_id VARCHAR(36) NOT NULL,
+            student_name VARCHAR(100) NOT NULL,
+            avatar VARCHAR(10) DEFAULT '♟️',
+            current_fen VARCHAR(150) NOT NULL,
+            last_move VARCHAR(20) NULL,
+            eval_score VARCHAR(20) DEFAULT '0.0',
+            status ENUM('active', 'waiting', 'solved', 'blunder') DEFAULT 'active',
+            hand_raised BOOLEAN DEFAULT FALSE,
+            moves_history JSON NULL,
+            updated_at TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ");
+
+        // Seed Active Classroom Session for Batch Alpha
+        $pdo->exec("
+        INSERT INTO classroom_sessions (id, batch_id, academy_id, coach_id, title, master_fen, is_locked)
+        VALUES ('session-01', 'batch-01', 'acad-001', 'usr-headcoach', 'Advanced Tactics & Strategy — Batch Alpha', 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', 0)
+        ON DUPLICATE KEY UPDATE title = VALUES(title);
+        ");
+
+        // Seed 6 Student Boards for Batch Alpha Simul Grid
+        $students = [
+            ['sb-1', 'session-01', 'st-1', 'Aarav Sharma', '👦', 'r1bqkb1r/pppp1ppp/2n5/4p3/2B1n3/5Q2/PPPP1PPP/RNB1K1NR w KQkq - 0 5', 'Qf3', '+1.4', 'active', 0],
+            ['sb-2', 'session-01', 'st-2', 'Diya Patel', '👧', '6k1/5ppp/8/8/8/5Q2/4NPPP/2r3K1 w - - 0 1', 'cxd4', '-0.8', 'blunder', 1],
+            ['sb-3', 'session-01', 'st-3', 'Rohan Iyer', '🧑', 'r3k2r/pppq1ppp/3p1n2/4p3/1b2P3/2NP1N2/PPP2PPP/R1BQK2R w KQkq - 0 8', 'Nf6', '+2.1', 'active', 0],
+            ['sb-4', 'session-01', 'st-4', 'Ananya Gupta', '👧', 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1', 'e4', '0.0', 'waiting', 0],
+            ['sb-5', 'session-01', 'st-5', 'Kabir Verma', '👦', 'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2', 'Nf3', '+3.6', 'active', 0],
+            ['sb-6', 'session-01', 'st-6', 'Meera Nair', '👧', '5rk1/1p3ppp/pq2p3/3p4/8/1P3Q2/P1r2PPP/R4RK1 w - - 0 20', 'Nf6', '-1.2', 'solved', 0]
+        ];
+
+        $sbStmt = $pdo->prepare("
+            INSERT INTO student_board_states (id, session_id, student_id, student_name, avatar, current_fen, last_move, eval_score, status, hand_raised)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE 
+                current_fen = VALUES(current_fen),
+                last_move = VALUES(last_move),
+                eval_score = VALUES(eval_score),
+                status = VALUES(status),
+                hand_raised = VALUES(hand_raised);
+        ");
+
+        foreach ($students as $sb) {
+            $sbStmt->execute($sb);
+        }
+
         echo json_encode([
             'status' => 'success',
-            'message' => "Successfully seeded {$seededCount} secured user accounts with bcrypt hashes",
+            'message' => "Successfully seeded {$seededCount} secured user accounts and classroom real-time session with 6 simul boards",
             'demo_accounts' => array_map(function($u) {
                 return ['email' => $u['email'], 'role' => $u['role'], 'name' => $u['name']];
             }, $demoUsers)
