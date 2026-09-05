@@ -99,10 +99,18 @@ if ($action === 'me' && $method === 'GET') {
 // Authenticates 1-click test roles against verified DB credentials
 // ---------------------------------------------------------
 if ($action === 'demo_login' && $method === 'POST') {
+    // Role switcher is strictly restricted to Platform Owner only
+    $caller = requireAuth($pdo);
+    if ($caller['role'] !== 'saas_owner') {
+        http_response_code(403);
+        echo json_encode(['status' => 'error', 'message' => 'Role switcher is restricted to SaaS Platform Owner only.']);
+        exit;
+    }
+
     $input = getJsonInput();
     $role = trim($input['role'] ?? 'head_coach');
 
-    $validRoles = ['saas_owner', 'academy_admin', 'head_coach', 'assistant_coach'];
+    $validRoles = ['saas_owner', 'academy_admin', 'head_coach', 'assistant_coach', 'student'];
     if (!in_array($role, $validRoles)) {
         http_response_code(400);
         echo json_encode(['status' => 'error', 'message' => 'Invalid demo role requested']);

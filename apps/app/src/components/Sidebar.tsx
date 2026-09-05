@@ -49,7 +49,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isMobileOpen,
   setIsMobileOpen
 }) => {
-  const { user, logout, setLoginModalOpen } = useAuth();
+  const { user, logout, setLoginModalOpen, isImpersonating, returnToOwnerRole } = useAuth();
   const [isHovered, setIsHovered] = useState<boolean>(false);
   const [tooltipItem, setTooltipItem] = useState<AppModule | null>(null);
 
@@ -323,37 +323,66 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        {/* Bottom User Area & Quick Role Switch */}
+        {/* Bottom User Area & Owner-Only Role Switch */}
         <div className="p-3 border-t border-zinc-800/80 bg-zinc-950/90 space-y-2">
-          {/* Quick Role Switcher */}
-          <button
-            onClick={() => setLoginModalOpen(true)}
-            className={`w-full flex items-center gap-2.5 p-2 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-800/90 hover:border-zinc-700 text-xs text-zinc-300 transition group ${
-              isExpanded ? 'justify-between' : 'justify-center'
-            }`}
-            title="Switch authenticated role or view permissions"
-          >
-            <div className="flex items-center gap-2 overflow-hidden">
-              <KeyRound className="w-3.5 h-3.5 text-orange-400 shrink-0 group-hover:rotate-12 transition-transform" />
-              {isExpanded && (
-                <div className="text-left truncate">
-                  <div className="text-[10px] text-zinc-400 uppercase font-mono font-semibold">Current Role</div>
-                  <div className="font-bold text-orange-400 text-xs truncate">
-                    {user.role.replace('_', ' ').toUpperCase()}
+          {/* Owner-Only Role Switcher */}
+          {user.role === 'saas_owner' && (
+            <button
+              onClick={() => setLoginModalOpen(true)}
+              className={`w-full flex items-center gap-2.5 p-2 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 hover:border-purple-500/50 text-xs text-purple-200 transition group ${
+                isExpanded ? 'justify-between' : 'justify-center'
+              }`}
+              title="Platform Owner Sandbox: Test different academy roles"
+            >
+              <div className="flex items-center gap-2 overflow-hidden">
+                <Crown className="w-3.5 h-3.5 text-purple-400 shrink-0 group-hover:rotate-12 transition-transform" />
+                {isExpanded && (
+                  <div className="text-left truncate">
+                    <div className="text-[9px] text-purple-400 uppercase font-mono font-bold flex items-center gap-1">
+                      <span>Owner Sandbox</span>
+                    </div>
+                    <div className="font-bold text-white text-xs truncate">
+                      Switch Role
+                    </div>
                   </div>
-                </div>
+                )}
+              </div>
+              {isExpanded && (
+                <ChevronRight className="w-3.5 h-3.5 text-purple-400 group-hover:text-white shrink-0" />
               )}
-            </div>
-            {isExpanded && (
-              <ChevronRight className="w-3.5 h-3.5 text-zinc-500 group-hover:text-zinc-300 shrink-0" />
-            )}
-          </button>
+            </button>
+          )}
+
+          {/* If Owner is currently Impersonating another role */}
+          {isImpersonating && (
+            <button
+              onClick={returnToOwnerRole}
+              className={`w-full flex items-center gap-2.5 p-2 rounded-xl bg-gradient-to-r from-amber-500/20 to-orange-500/20 hover:from-amber-500/30 hover:to-orange-500/30 border border-amber-500/40 text-xs text-amber-200 transition group shadow-sm ${
+                isExpanded ? 'justify-between' : 'justify-center'
+              }`}
+              title="Return to SaaS Platform Owner Profile"
+            >
+              <div className="flex items-center gap-2 overflow-hidden">
+                <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-bounce" />
+                {isExpanded && (
+                  <div className="text-left truncate">
+                    <div className="text-[9px] text-amber-400 uppercase font-mono font-bold">Impersonating</div>
+                    <div className="font-bold text-white text-xs truncate">
+                      Return to Owner
+                    </div>
+                  </div>
+                )}
+              </div>
+              {isExpanded && (
+                <ChevronRight className="w-3.5 h-3.5 text-amber-400 group-hover:text-white shrink-0" />
+              )}
+            </button>
+          )}
 
           {/* User Profile Pill & Logout */}
           <div className="flex items-center justify-between gap-2 pt-1">
             <div 
-              onClick={() => setLoginModalOpen(true)}
-              className={`flex items-center gap-2.5 overflow-hidden cursor-pointer hover:opacity-90 transition ${
+              className={`flex items-center gap-2.5 overflow-hidden ${
                 isExpanded ? 'flex-1' : 'justify-center w-full'
               }`}
             >
@@ -364,7 +393,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <div className="text-left truncate">
                   <div className="text-xs font-black text-zinc-200 truncate leading-tight">{user.name}</div>
                   <div className="text-[10px] text-zinc-400 truncate mt-0.5">
-                    {user.academyName || 'Platform Owner'}
+                    {user.academyName || (user.role === 'saas_owner' ? 'Platform Owner' : user.role.replace('_', ' ').toUpperCase())}
                   </div>
                 </div>
               )}

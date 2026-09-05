@@ -11,8 +11,10 @@ interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   isLoggedIn: boolean;
+  isImpersonating: boolean;
   login: (email: string, pass: string) => Promise<AuthResponse>;
   quickSwitchRole: (role: UserRole) => Promise<void>;
+  returnToOwnerRole: () => Promise<void>;
   logout: () => void;
   hasPermission: (permission: string) => boolean;
   canAccessTab: (tabId: string) => boolean;
@@ -36,6 +38,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     // Protected by default: Unauthenticated visitors MUST log in
     return null;
+  });
+  const [isImpersonating, setIsImpersonating] = useState<boolean>(() => {
+    return Boolean(localStorage.getItem('chessplay_owner_token'));
   });
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isLoginModalOpen, setLoginModalOpen] = useState<boolean>(false);
@@ -142,10 +147,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const quickSwitchRole = useCallback(async (role: UserRole) => {
+    // Security Guard: Only SaaS Owner or an owner currently impersonating can trigger role switcher
+    const ownerToken = localStorage.getItem('chessplay_owner_token');
+    if (user?.role !== 'saas_owner' && !ownerToken) {
+      console.warn('Unauthorized role switch attempt blocked: Restricted to SaaS Owner.');
+      return;
+    }
+
+    // Preserve original owner credentials for 1-click return
+    if (user?.role === 'saas_owner' && token) {
+      localStorage.setItem('chessplay_owner_token', token);
+      localStorage.setItem('chessplay_owner_user', JSON.stringify(user));
+      setIsImpersonating(true);
+    }
+
+    if (role === 'saas_owner') {
+      localStorage.removeItem('chessplay_owner_token');
+      localStorage.removeItem('chessplay_owner_user');
+      setIsImpersonating(false);
+    }
+
+    const authHeader = ownerToken || token;
+
     try {
       const res = await fetch('/api/auth.php?action=demo_login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(authHeader ? { 'Authorization': `Bearer ${authHeader}` } : {})
+        },
         body: JSON.stringify({ role })
       });
 
@@ -194,11 +224,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(fallbackUser);
     localStorage.setItem('chessplay_auth_user', JSON.stringify(fallbackUser));
     setLoginModalOpen(false);
-  }, []);
+  }, [user, token]);
+
+  const returnToOwnerRole = useCallback(async () => {
+    const ownerToken = localStorage.getItem('chessplay_owner_token');
+    const ownerUser = localStorage.getItem('chessplay_owner_user');
+    if (ownerToken && ownerUser) {
+      try {
+        const parsed = JSON.parse(ownerUser);
+        setToken(ownerToken);
+        setUser(parsed);
+        localStorage.setItem('chessplay_auth_jwt', ownerToken);
+        localStorage.setItem('chessplay_auth_user', ownerUser);
+      } catch {
+        await quickSwitchRole('saas_owner');
+      }
+    } else {
+      await quickSwitchRole('saas_owner');
+    }
+    localStorage.removeItem('chessplay_owner_token');
+    localStorage.removeItem('chessplay_owner_user');
+    setIsImpersonating(false);
+    setLoginModalOpen(false);
+  }, [quickSwitchRole]);
 
   const logout = useCallback(() => {
     localStorage.removeItem('chessplay_auth_jwt');
     localStorage.removeItem('chessplay_auth_user');
+    localStorage.removeItem('chessplay_owner_token');
+    localStorage.removeItem('chessplay_owner_user');
+    setIsImpersonating(false);
     setToken(null);
     setUser(null);
     setLoginModalOpen(false);
@@ -236,8 +291,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         token,
         isLoading,
         isLoggedIn: Boolean(user && token),
+        isImpersonating,
         login,
         quickSwitchRole,
+        returnToOwnerRole,
         logout,
         hasPermission,
         canAccessTab,

@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
-import { KeyRound, Lock, Loader2, AlertCircle, Eye, EyeOff, Sparkles, ArrowRight } from 'lucide-react';
+import { KeyRound, Lock, Loader2, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../services/authContext';
-import { DEMO_CREDENTIALS, UserRole } from '../types/auth';
 
 export const AuthPortal: React.FC = () => {
-  const { login, quickSwitchRole } = useAuth();
+  const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -21,13 +20,6 @@ export const AuthPortal: React.FC = () => {
     if (!res.success) {
       setError(res.error || 'Invalid credentials. Please verify your email and password.');
     }
-  };
-
-  const handleDemoSwitch = async (role: UserRole) => {
-    setError(null);
-    setIsSubmitting(true);
-    await quickSwitchRole(role);
-    setIsSubmitting(false);
   };
 
   return (
@@ -142,36 +134,6 @@ export const AuthPortal: React.FC = () => {
               )}
             </button>
           </form>
-
-          <div className="pt-2 border-t border-zinc-800/80">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] font-bold text-zinc-400 flex items-center gap-1">
-                <Sparkles className="w-3 h-3 text-orange-400" /> Instant 1-Click Demo Login
-              </span>
-              <span className="text-[10px] text-zinc-500 font-mono">Live JWT</span>
-            </div>
-            <div className="grid grid-cols-2 gap-1.5">
-              {DEMO_CREDENTIALS.map((cred) => (
-                <button
-                  key={cred.role}
-                  type="button"
-                  disabled={isSubmitting}
-                  onClick={() => handleDemoSwitch(cred.role)}
-                  className="p-2 rounded-xl bg-zinc-950/70 hover:bg-zinc-800/90 border border-zinc-800 text-left transition flex items-center justify-between group disabled:opacity-50"
-                >
-                  <div className="min-w-0 pr-1">
-                    <div className="text-[11px] font-bold text-zinc-200 group-hover:text-orange-400 transition truncate">
-                      {cred.roleTitle.split('(')[0]}
-                    </div>
-                    <div className="text-[10px] text-zinc-500 font-mono truncate">
-                      {cred.email}
-                    </div>
-                  </div>
-                  <ArrowRight className="w-3.5 h-3.5 text-zinc-600 group-hover:text-orange-400 group-hover:translate-x-0.5 transition flex-shrink-0" />
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       </main>
 

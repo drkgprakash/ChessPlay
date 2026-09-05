@@ -1,7 +1,5 @@
 import React from 'react';
 import { 
-  KeyRound, 
-  ChevronDown, 
   LogOut,
   Menu,
   Crown,
@@ -108,7 +106,7 @@ export const Header: React.FC<HeaderProps> = ({
   isMobileOpen,
   setIsMobileOpen
 }) => {
-  const { user, logout, setLoginModalOpen } = useAuth();
+  const { user, logout } = useAuth();
 
   if (!user) return null;
 
@@ -153,7 +151,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Right: Operational Status, Role Switcher & User Action */}
+        {/* Right: Operational Status & User Profile */}
         <div className="flex items-center gap-3">
           {/* Edge Network Status Pill */}
           <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900/90 border border-zinc-800/90 text-[11px] font-mono font-medium text-emerald-400/90 shadow-sm">
@@ -161,25 +159,8 @@ export const Header: React.FC<HeaderProps> = ({
             <span>Edge: 99.99% Operational</span>
           </div>
 
-          {/* Quick Role Switcher Pill */}
-          <button
-            onClick={() => setLoginModalOpen(true)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800/90 border border-zinc-800 hover:border-zinc-700 text-xs font-semibold transition text-zinc-200 group shadow-sm"
-            title="Switch demo account or view role permissions"
-          >
-            <KeyRound className="w-3.5 h-3.5 text-orange-400 group-hover:rotate-12 transition-transform" />
-            <span className="hidden md:inline text-zinc-400 font-normal">Role:</span>
-            <span className="px-1.5 py-0.5 rounded-md bg-orange-500/15 text-orange-400 font-mono text-[10px] font-bold uppercase">
-              {user.role.replace('_', ' ')}
-            </span>
-            <ChevronDown className="w-3 h-3 text-zinc-500 group-hover:text-zinc-300" />
-          </button>
-
-          {/* User Profile Tile */}
-          <div
-            onClick={() => setLoginModalOpen(true)}
-            className="flex items-center gap-2.5 pl-2.5 border-l border-zinc-800 cursor-pointer hover:opacity-90 transition"
-          >
+          {/* User Profile Badge */}
+          <div className="flex items-center gap-2.5 pl-2.5 border-l border-zinc-800">
             <div className="w-8 h-8 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-base shadow-sm">
               {user.avatar}
             </div>

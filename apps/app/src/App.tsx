@@ -16,7 +16,7 @@ import { AuthProvider, useAuth } from './services/authContext';
 import { ShieldAlert, KeyRound, Lock, Loader2 } from 'lucide-react';
 
 const AccessDeniedView: React.FC<{ moduleName: string; requiredRole: string }> = ({ moduleName, requiredRole }) => {
-  const { user, setLoginModalOpen } = useAuth();
+  const { user, setLoginModalOpen, logout } = useAuth();
 
   return (
     <div className="max-w-xl mx-auto my-16 p-8 rounded-3xl bg-zinc-900/90 border border-red-500/30 shadow-2xl text-center space-y-6 animate-in fade-in">
@@ -46,12 +46,21 @@ const AccessDeniedView: React.FC<{ moduleName: string; requiredRole: string }> =
       </div>
 
       <div className="pt-2 flex justify-center gap-3">
-        <button
-          onClick={() => setLoginModalOpen(true)}
-          className="px-6 py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 font-bold text-xs text-white transition flex items-center gap-2 shadow-lg shadow-orange-500/20"
-        >
-          <KeyRound className="w-4 h-4" /> Switch to Authorized Account
-        </button>
+        {user?.role === 'saas_owner' ? (
+          <button
+            onClick={() => setLoginModalOpen(true)}
+            className="px-6 py-3 rounded-xl bg-purple-600 hover:bg-purple-700 font-bold text-xs text-white transition flex items-center gap-2 shadow-lg shadow-purple-500/20"
+          >
+            <KeyRound className="w-4 h-4" /> Owner Sandbox: Switch Role
+          </button>
+        ) : (
+          <button
+            onClick={logout}
+            className="px-6 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 font-bold text-xs text-white transition flex items-center gap-2 shadow-md"
+          >
+            <Lock className="w-4 h-4" /> Sign Out & Switch Account
+          </button>
+        )}
       </div>
     </div>
   );
