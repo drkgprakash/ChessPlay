@@ -501,9 +501,112 @@ if ($action === 'seed_auth' || $action === 'migrate') {
         // Ensure student st-1 has student@achieverschess.com email
         $pdo->exec("UPDATE students SET email = 'student@achieverschess.com' WHERE id = 'st-1'");
 
+        // 5. Student Performance Report Cards Schema
+        $pdo->exec("
+        CREATE TABLE IF NOT EXISTS student_reports (
+            id VARCHAR(36) PRIMARY KEY,
+            student_id VARCHAR(36) NOT NULL,
+            academy_id VARCHAR(36) NOT NULL,
+            coach_id VARCHAR(36) NOT NULL,
+            period_label VARCHAR(50) NOT NULL,
+            rating INT NOT NULL,
+            rating_change INT DEFAULT 0,
+            attendance_pct INT NOT NULL,
+            homework_pct INT NOT NULL,
+            puzzles_solved INT NOT NULL,
+            overall_grade VARCHAR(10) DEFAULT 'A',
+            openings_score INT DEFAULT 85,
+            tactics_score INT DEFAULT 90,
+            endgames_score INT DEFAULT 82,
+            time_mgmt_score INT DEFAULT 88,
+            strengths TEXT NULL,
+            areas_for_growth TEXT NULL,
+            coach_remarks TEXT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_student_report (student_id, created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ");
+
+        // Seed Sample Reports
+        $repStmt = $pdo->prepare("
+            INSERT INTO student_reports (id, student_id, academy_id, coach_id, period_label, rating, rating_change, attendance_pct, homework_pct, puzzles_solved, overall_grade, openings_score, tactics_score, endgames_score, time_mgmt_score, strengths, areas_for_growth, coach_remarks)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE 
+                rating = VALUES(rating),
+                rating_change = VALUES(rating_change),
+                attendance_pct = VALUES(attendance_pct),
+                homework_pct = VALUES(homework_pct),
+                puzzles_solved = VALUES(puzzles_solved),
+                overall_grade = VALUES(overall_grade),
+                coach_remarks = VALUES(coach_remarks);
+        ");
+
+        $repStmt->execute([
+            'rep-01',
+            'st-1',
+            'acad-001',
+            'usr-headcoach',
+            'September 2026',
+            1485,
+            45,
+            96,
+            92,
+            142,
+            'A+',
+            88,
+            95,
+            86,
+            90,
+            'Exceptional pin recognition, rapid calculation in sharp positions, and aggressive piece development.',
+            'Pawn structure evaluation in closed positions and complex rook endgame technique.',
+            'Aarav is showing rapid maturity in tournament and simul games. His tactical instincts have sharpened remarkably this month!'
+        ]);
+
+        $repStmt->execute([
+            'rep-02',
+            'st-2',
+            'acad-001',
+            'usr-headcoach',
+            'September 2026',
+            1520,
+            35,
+            94,
+            95,
+            168,
+            'A+',
+            92,
+            94,
+            90,
+            88,
+            'Flawless homework completion, disciplined clock usage, and deep Sicilian defense preparation.',
+            'Handling violent king hunts and managing counter-attacks along open files.',
+            'Diya continues to be an exemplary student with near-perfect homework consistency. Fully primed for upcoming state Swiss events.'
+        ]);
+
+        $repStmt->execute([
+            'rep-03',
+            'st-3',
+            'acad-001',
+            'usr-headcoach',
+            'September 2026',
+            1610,
+            60,
+            98,
+            96,
+            195,
+            'A+',
+            90,
+            98,
+            92,
+            94,
+            'Mastery of bishop & queen batteries, lethal endgame conversions, and calm composure under time pressure.',
+            'Exploring offbeat hypermodern flank openings.',
+            'Rohan is our top performer this month. Cross-table simul results demonstrate clear Candidate Master potential!'
+        ]);
+
         echo json_encode([
             'status' => 'success',
-            'message' => "Successfully seeded {$seededCount} secured user accounts, classroom simul boards, and homework curricula",
+            'message' => "Successfully seeded {$seededCount} secured user accounts, classroom simul boards, homework curricula, and student performance reports",
             'demo_accounts' => array_map(function($u) {
                 return ['email' => $u['email'], 'role' => $u['role'], 'name' => $u['name']];
             }, $demoUsers)

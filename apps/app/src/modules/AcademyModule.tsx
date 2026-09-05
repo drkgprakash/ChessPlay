@@ -3,10 +3,11 @@ import {
   Users, Calendar, CheckSquare, FileText, Send, Plus, Search, 
   Filter, Sparkles, TrendingUp, Edit3, Trash2, X, AlertCircle, 
   RefreshCw, Award, MessageCircle, Phone, Mail, CheckCircle2, 
-  Clock, Shield, ArrowRight, UserCheck, Layers
+  Clock, Shield, ArrowRight, UserCheck, Layers, Printer
 } from 'lucide-react';
 import { useAuth } from '../services/authContext';
 import { userService, Student, Batch } from '../services/userService';
+import { ReportCardModal } from '../components/ReportCardModal';
 
 export const AcademyModule: React.FC = () => {
   const { user, token } = useAuth();
@@ -29,6 +30,7 @@ export const AcademyModule: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [deletingStudent, setDeletingStudent] = useState<Student | null>(null);
+  const [reportCardStudent, setReportCardStudent] = useState<Student | null>(null);
   const [whatsappSentNotice, setWhatsappSentNotice] = useState<boolean>(false);
 
   // Batch Modals state
@@ -528,6 +530,17 @@ _Sent via Chess Play Academy Platform_`;
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
+                                setSelectedStudent(st);
+                                setReportCardStudent(st);
+                              }}
+                              className="p-1.5 rounded-lg text-orange-400 hover:text-orange-300 hover:bg-orange-500/10 transition"
+                              title="Official Performance Report Card"
+                            >
+                              <FileText className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 setEditingStudent(st);
                               }}
                               className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition"
@@ -618,13 +631,20 @@ _Sent via Chess Play Academy Platform_`;
                   </p>
                 </div>
 
-                {/* 1-Click WhatsApp Parent Progress Dispatch */}
+                {/* Report Card & WhatsApp Dispatch */}
                 <div className="pt-2 border-t border-zinc-800 space-y-2">
                   <button
-                    onClick={() => handleSendWhatsAppReport(selectedStudent)}
-                    className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-bold text-xs text-white transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20"
+                    onClick={() => setReportCardStudent(selectedStudent)}
+                    className="w-full py-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 font-bold text-xs text-white transition flex items-center justify-center gap-2 shadow-lg shadow-orange-500/20"
                   >
-                    <MessageCircle className="w-4 h-4" /> Send WhatsApp Progress Card to Parent
+                    <Printer className="w-4 h-4" /> Official Report Card (Print & PDF)
+                  </button>
+
+                  <button
+                    onClick={() => handleSendWhatsAppReport(selectedStudent)}
+                    className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-bold text-xs text-white transition flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20"
+                  >
+                    <MessageCircle className="w-4 h-4" /> Quick WhatsApp Progress Dispatch
                   </button>
 
                   {whatsappSentNotice && (
@@ -1269,6 +1289,16 @@ _Sent via Chess Play Academy Platform_`;
             </div>
           </div>
         </div>
+      )}
+
+      {/* Official Student Performance Report Card Modal */}
+      {reportCardStudent && (
+        <ReportCardModal
+          isOpen={!!reportCardStudent}
+          onClose={() => setReportCardStudent(null)}
+          student={reportCardStudent}
+          onReportSaved={loadData}
+        />
       )}
     </div>
   );
