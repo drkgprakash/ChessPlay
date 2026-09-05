@@ -134,11 +134,36 @@ export const ClassroomModule: React.FC = () => {
   const [isMyHandRaised, setIsMyHandRaised] = useState<boolean>(false);
 
   // Real Media AV & Screen Share
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const [isCamStreaming, setIsCamStreaming] = useState<boolean>(false);
   const [isScreenSharing, setIsScreenSharing] = useState<boolean>(false);
   const [audioWave, setAudioWave] = useState<number[]>([35, 65, 90, 55, 75]);
+
+  // Callback ref to guarantee immediate stream binding when video element mounts
+  const setVideoRef = (element: HTMLVideoElement | null) => {
+    videoRef.current = element;
+    if (element && localStreamRef.current) {
+      if (element.srcObject !== localStreamRef.current) {
+        element.srcObject = localStreamRef.current;
+      }
+      element.play().catch(err => {
+        console.warn('Video auto-playback deferred:', err);
+      });
+    }
+  };
+
+  // Sync stream to video element on state transitions
+  useEffect(() => {
+    if (videoRef.current && localStreamRef.current) {
+      if (videoRef.current.srcObject !== localStreamRef.current) {
+        videoRef.current.srcObject = localStreamRef.current;
+      }
+      videoRef.current.play().catch(err => {
+        console.warn('Video play update error:', err);
+      });
+    }
+  }, [isCamStreaming, isScreenSharing]);
 
   // PGN Export & Study Library State
   const [showPgnModal, setShowPgnModal] = useState<boolean>(false);
@@ -545,22 +570,42 @@ export const ClassroomModule: React.FC = () => {
         localStreamRef.current.getTracks().forEach(t => t.stop());
         localStreamRef.current = null;
       }
-      if (videoRef.current) videoRef.current.srcObject = null;
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
       setIsCamStreaming(false);
       setCamOn(false);
     } else {
       setCamOn(true);
       try {
-        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: micOn });
-          localStreamRef.current = stream;
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-          }
-          setIsCamStreaming(true);
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          alert('Camera access is not supported by this browser environment.');
+          return;
         }
-      } catch {
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+          audio: micOn
+        });
+
+        localStreamRef.current = stream;
+        setIsCamStreaming(true);
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(err => console.warn('Camera play:', err));
+        }
+
+        stream.getVideoTracks().forEach(track => {
+          track.onended = () => {
+            setIsCamStreaming(false);
+            if (videoRef.current) videoRef.current.srcObject = null;
+          };
+        });
+      } catch (err: any) {
+        console.warn('Camera permission/hardware error:', err);
         setIsCamStreaming(false);
+        alert('Could not access camera: ' + (err.name === 'NotAllowedError' ? 'Permission was denied. Please allow camera in browser settings.' : err.message || 'Device in use or not found.'));
       }
     }
   };
@@ -572,23 +617,32 @@ export const ClassroomModule: React.FC = () => {
         localStreamRef.current.getTracks().forEach(t => t.stop());
         localStreamRef.current = null;
       }
-      if (videoRef.current) videoRef.current.srcObject = null;
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
       setIsScreenSharing(false);
     } else {
       try {
-        if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
-          const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-          localStreamRef.current = stream;
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-          }
-          setIsScreenSharing(true);
-          stream.getVideoTracks()[0].onended = () => {
-            setIsScreenSharing(false);
-            if (videoRef.current) videoRef.current.srcObject = null;
-          };
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+          alert('Screen sharing is not supported by your browser.');
+          return;
         }
-      } catch {
+
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        localStreamRef.current = stream;
+        setIsScreenSharing(true);
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(err => console.warn('Screen share play:', err));
+        }
+
+        stream.getVideoTracks()[0].onended = () => {
+          setIsScreenSharing(false);
+          if (videoRef.current) videoRef.current.srcObject = null;
+        };
+      } catch (err: any) {
+        console.warn('Screen share error:', err);
         setIsScreenSharing(false);
       }
     }
@@ -1051,29 +1105,35 @@ export const ClassroomModule: React.FC = () => {
             {/* AV Stream Stage Card */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-xl flex flex-col">
               <div className="relative aspect-video bg-zinc-950 flex items-center justify-center overflow-hidden">
-                {isCamStreaming || isScreenSharing ? (
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="flex flex-col items-center justify-center p-6 text-center">
+                {/* Always-mounted video element ensuring ref and stream binding are instant */}
+                <video
+                  ref={setVideoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  onLoadedMetadata={() => videoRef.current?.play().catch(e => console.warn(e))}
+                  onCanPlay={() => videoRef.current?.play().catch(e => console.warn(e))}
+                  className={`w-full h-full object-cover transition-opacity duration-300 ${
+                    isCamStreaming || isScreenSharing ? 'opacity-100 block' : 'opacity-0 hidden pointer-events-none'
+                  }`}
+                />
+
+                {/* Studio Presenter Card when stream is idle */}
+                {!(isCamStreaming || isScreenSharing) && (
+                  <div className="flex flex-col items-center justify-center p-6 text-center w-full h-full animate-in fade-in">
                     {camOn ? (
-                      <div className="flex flex-col items-center gap-3">
+                      <div className="flex flex-col items-center gap-2.5">
                         <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-orange-500 to-amber-600 flex items-center justify-center text-white font-black text-2xl shadow-lg shadow-orange-500/30">
                           ♟️
                         </div>
                         <div>
                           <div className="text-sm font-bold text-white">GM Vikram Sen</div>
-                          <div className="text-xs text-orange-400 font-medium">Head Coach Broadcast</div>
+                          <div className="text-xs text-orange-400 font-medium">Head Coach Masterclass</div>
                         </div>
 
                         {/* Live Audio Waveform */}
                         {micOn ? (
-                          <div className="flex items-center gap-1 h-5 mt-2">
+                          <div className="flex items-center gap-1 h-5 mt-1">
                             {audioWave.map((h, i) => (
                               <div
                                 key={i}
@@ -1081,13 +1141,20 @@ export const ClassroomModule: React.FC = () => {
                                 style={{ height: `${h}px` }}
                               />
                             ))}
-                            <span className="text-[9px] font-mono text-emerald-400 font-bold ml-1">MIC LIVE</span>
+                            <span className="text-[9px] font-mono text-emerald-400 font-bold ml-1">AUDIO READY</span>
                           </div>
                         ) : (
-                          <span className="text-[9px] font-mono text-zinc-500 font-medium mt-2 flex items-center gap-1">
+                          <span className="text-[9px] font-mono text-zinc-500 font-medium mt-1 flex items-center gap-1">
                             <VolumeX className="w-3 h-3 text-zinc-500" /> Mic Muted
                           </span>
                         )}
+
+                        <button
+                          onClick={handleToggleCam}
+                          className="mt-2 px-3.5 py-1.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-orange-500/20 transition"
+                        >
+                          <Video className="w-3.5 h-3.5" /> Start Live Camera
+                        </button>
                       </div>
                     ) : (
                       <div className="text-xs text-zinc-500 flex flex-col items-center gap-2">
@@ -1095,7 +1162,12 @@ export const ClassroomModule: React.FC = () => {
                           <VideoOff className="w-5 h-5" />
                         </div>
                         <span>Camera Stream Paused</span>
-                        <span className="text-[10px] text-zinc-600">Click camera button to resume broadcast</span>
+                        <button
+                          onClick={handleToggleCam}
+                          className="mt-1 px-3 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold transition"
+                        >
+                          Resume Camera
+                        </button>
                       </div>
                     )}
                   </div>
@@ -1105,7 +1177,7 @@ export const ClassroomModule: React.FC = () => {
                 <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 z-20">
                   <div className="px-2.5 py-0.5 rounded-full bg-black/70 backdrop-blur-md text-[10px] font-mono font-semibold text-emerald-400 flex items-center gap-1.5 border border-white/10">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                    {isScreenSharing ? 'SCREEN CAST' : isCamStreaming ? 'LIVE WEBCAM' : '1080p 60FPS'}
+                    {isScreenSharing ? 'SCREEN CAST' : isCamStreaming ? 'LIVE WEBCAM' : 'STUDIO BROADCAST'}
                   </div>
                 </div>
 
