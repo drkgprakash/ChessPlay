@@ -567,5 +567,182 @@ if ($method === 'DELETE' && $action === 'delete_student') {
     exit;
 }
 
+// =========================================================
+// 9. GET ?type=batches
+// List batches with coach details and enrolled student counts
+// =========================================================
+if ($method === 'GET' && $type === 'batches') {
+    $sql = "SELECT b.*, u.name AS coach_name, u.avatar_emoji AS coach_avatar, u.email AS coach_email,
+                   (SELECT COUNT(*) FROM students s WHERE s.batch_id = b.id) AS enrolled_count
+            FROM batches b
+            LEFT JOIN users u ON b.coach_id = u.id
+            WHERE 1=1";
+    $params = [];
+
+    if ($user['role'] !== 'saas_owner') {
+        $sql .= " AND b.academy_id = :acad_id";
+        $params['acad_id'] = $user['academy_id'] ?? 'acad-001';
+    }
+
+    $sql .= " ORDER BY b.created_at ASC";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $batches = $stmt->fetchAll();
+
+    // Also fetch available coaches for the dropdown
+    $cSql = "SELECT id, name, role, avatar_emoji, fide_title FROM users WHERE role IN ('head_coach', 'assistant_coach', 'academy_admin')";
+    if ($user['role'] !== 'saas_owner') {
+        $cSql .= " AND academy_id = :acad_id";
+        $cStmt = $pdo->prepare($cSql);
+        $cStmt->execute(['acad_id' => $user['academy_id'] ?? 'acad-001']);
+    } else {
+        $cStmt = $pdo->prepare($cSql);
+        $cStmt->execute();
+    }
+    $coaches = $cStmt->fetchAll();
+
+    echo json_encode([
+        'status' => 'success',
+        'batches' => $batches,
+        'coaches' => $coaches,
+        'total' => count($batches)
+    ]);
+    exit;
+}
+
+// =========================================================
+// 10. POST ?action=create_batch
+// Create new batch (RBAC: saas_owner, academy_admin, head_coach)
+// =========================================================
+if ($method === 'POST' && $action === 'create_batch') {
+    $callerRole = $user['role'];
+    if ($callerRole === 'assistant_coach' || $callerRole === 'student' || $callerRole === 'parent') {
+        http_response_code(403);
+        echo json_encode(['status' => 'error', 'message' => 'Forbidden: Insufficient permissions to create batches']);
+        exit;
+    }
+
+    $input = getJsonInput();
+    $name = trim($input['name'] ?? '');
+    $coachId = trim($input['coach_id'] ?? '');
+    $schedule = trim($input['schedule'] ?? '');
+    $level = trim($input['level'] ?? 'intermediate');
+    $maxStudents = !empty($input['max_students']) ? (int)$input['max_students'] : 12;
+
+    $academyId = $user['academy_id'] ?? 'acad-001';
+
+    $errors = [];
+    if (strlen($name) < 2) {
+        $errors[] = 'Batch name must be at least 2 characters';
+    }
+    if (strlen($schedule) < 2) {
+        $errors[] = 'Schedule timing is required';
+    }
+    if (!in_array($level, ['beginner', 'intermediate', 'advanced', 'master'])) {
+        $errors[] = 'Invalid skill level tier';
+    }
+    if ($maxStudents < 1 || $maxStudents > 50) {
+        $errors[] = 'Seat capacity must be between 1 and 50';
+    }
+
+    if (!empty($errors)) {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => implode(' • ', $errors)]);
+        exit;
+    }
+
+    $id = 'batch-' . bin2hex(random_bytes(4));
+
+    $insStmt = $pdo->prepare("
+        INSERT INTO batches (id, academy_id, name, coach_id, schedule, level, max_students)
+        VALUES (:id, :acad, :name, :coach, :schedule, :level, :max)
+    ");
+    $insStmt->execute([
+        'id' => $id,
+        'acad' => $academyId,
+        'name' => $name,
+        'coach' => !empty($coachId) ? $coachId : null,
+        'schedule' => $schedule,
+        'level' => $level,
+        'max' => $maxStudents
+    ]);
+
+    echo json_encode([
+        'status' => 'success',
+        'message' => 'Batch created successfully',
+        'batch_id' => $id
+    ]);
+    exit;
+}
+
+// =========================================================
+// 11. PUT ?action=update_batch
+// Update batch details (schedule, coach, capacity)
+// =========================================================
+if ($method === 'PUT' && $action === 'update_batch') {
+    $callerRole = $user['role'];
+    if ($callerRole === 'assistant_coach' || $callerRole === 'student' || $callerRole === 'parent') {
+        http_response_code(403);
+        echo json_encode(['status' => 'error', 'message' => 'Forbidden']);
+        exit;
+    }
+
+    $input = getJsonInput();
+    $id = trim($input['id'] ?? '');
+    $name = trim($input['name'] ?? '');
+    $coachId = trim($input['coach_id'] ?? '');
+    $schedule = trim($input['schedule'] ?? '');
+    $level = trim($input['level'] ?? 'intermediate');
+    $maxStudents = isset($input['max_students']) ? (int)$input['max_students'] : 12;
+
+    $uStmt = $pdo->prepare("
+        UPDATE batches 
+        SET name = COALESCE(:name, name),
+            coach_id = :coach,
+            schedule = :schedule,
+            level = :level,
+            max_students = :max
+        WHERE id = :id
+    ");
+    $uStmt->execute([
+        'name' => !empty($name) ? $name : null,
+        'coach' => !empty($coachId) ? $coachId : null,
+        'schedule' => $schedule,
+        'level' => $level,
+        'max' => $maxStudents,
+        'id' => $id
+    ]);
+
+    echo json_encode(['status' => 'success', 'message' => 'Batch updated successfully']);
+    exit;
+}
+
+// =========================================================
+// 12. DELETE ?action=delete_batch
+// Remove batch
+// =========================================================
+if ($method === 'DELETE' && $action === 'delete_batch') {
+    $callerRole = $user['role'];
+    if ($callerRole !== 'saas_owner' && $callerRole !== 'academy_admin') {
+        http_response_code(403);
+        echo json_encode(['status' => 'error', 'message' => 'Forbidden: Only Admins can delete batches']);
+        exit;
+    }
+
+    $id = trim($_GET['id'] ?? '');
+
+    // Unlink any students enrolled in this batch
+    $unlinkStmt = $pdo->prepare("UPDATE students SET batch_id = NULL WHERE batch_id = :id");
+    $unlinkStmt->execute(['id' => $id]);
+
+    $delStmt = $pdo->prepare("DELETE FROM batches WHERE id = :id");
+    $delStmt->execute(['id' => $id]);
+
+    echo json_encode(['status' => 'success', 'message' => 'Batch deleted successfully']);
+    exit;
+}
+
 http_response_code(400);
 echo json_encode(['status' => 'error', 'message' => 'Invalid action or request method']);
+

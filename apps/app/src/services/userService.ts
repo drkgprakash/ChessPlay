@@ -46,12 +46,18 @@ export interface Student {
 export interface Batch {
   id: string;
   name: string;
+  coach_id?: string;
+  coach_name?: string;
+  coach_avatar?: string;
+  coach_email?: string;
   schedule: string;
-  level: string;
+  level: 'beginner' | 'intermediate' | 'advanced' | 'master';
   max_students: number;
+  enrolled_count?: number;
 }
 
 const API_BASE = '/api/users.php';
+
 
 export const userService = {
   /**
@@ -248,5 +254,102 @@ export const userService = {
     } catch (err: any) {
       return { success: false, message: err.message || 'Network error' };
     }
+  },
+
+  /**
+   * Fetch all batches with coach info and enrollment counts
+   */
+  async getBatches(token: string): Promise<{ batches: Batch[]; coaches: any[] }> {
+    try {
+      const res = await fetch(`${API_BASE}?type=batches`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return {
+          batches: data.batches || [],
+          coaches: data.coaches || []
+        };
+      }
+    } catch (err) {
+      console.warn('Failed to fetch batches:', err);
+    }
+    return { batches: [], coaches: [] };
+  },
+
+  /**
+   * Create new batch
+   */
+  async createBatch(
+    token: string,
+    payload: {
+      name: string;
+      coach_id?: string;
+      schedule: string;
+      level: string;
+      max_students: number;
+    }
+  ): Promise<{ success: boolean; message: string; batch_id?: string }> {
+    try {
+      const res = await fetch(`${API_BASE}?action=create_batch`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      return { success: res.ok && data.status === 'success', message: data.message || 'Batch creation failed', batch_id: data.batch_id };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Network error' };
+    }
+  },
+
+  /**
+   * Update batch
+   */
+  async updateBatch(
+    token: string,
+    payload: {
+      id: string;
+      name?: string;
+      coach_id?: string;
+      schedule?: string;
+      level?: string;
+      max_students?: number;
+    }
+  ): Promise<{ success: boolean; message: string }> {
+    try {
+      const res = await fetch(`${API_BASE}?action=update_batch`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      return { success: res.ok && data.status === 'success', message: data.message || 'Update failed' };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Network error' };
+    }
+  },
+
+  /**
+   * Delete batch
+   */
+  async deleteBatch(token: string, id: string): Promise<{ success: boolean; message: string }> {
+    try {
+      const res = await fetch(`${API_BASE}?action=delete_batch&id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      return { success: res.ok && data.status === 'success', message: data.message || 'Delete failed' };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Network error' };
+    }
   }
 };
+
