@@ -49,7 +49,10 @@ if ($action === 'seed_auth' || $action === 'migrate') {
         $cols = [
             "logo_url VARCHAR(255) NULL",
             "primary_color VARCHAR(20) DEFAULT '#f97316'",
-            "whatsapp_number VARCHAR(30) NULL"
+            "whatsapp_number VARCHAR(30) NULL",
+            "monthly_billing DECIMAL(10,2) DEFAULT 7999.00",
+            "contact_email VARCHAR(150) NULL",
+            "admin_name VARCHAR(100) NULL"
         ];
         foreach ($cols as $colDef) {
             try {
@@ -113,14 +116,23 @@ if ($action === 'seed_auth' || $action === 'migrate') {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
         ");
 
-        // Seed Academies
+        // Seed 6 Academies
         $pdo->exec("
-        INSERT INTO academies (id, name, slug, plan_tier, primary_color, whatsapp_number, status)
+        INSERT INTO academies (id, name, slug, plan_tier, primary_color, whatsapp_number, monthly_billing, contact_email, admin_name, status)
         VALUES 
-        ('acad-001', 'Achiever\'s Chess Academy', 'achievers', 'pro', '#f97316', '+919876543210', 'active'),
-        ('acad-002', 'KnightSquad Club', 'knightsquad', 'enterprise', '#3b82f6', '+919876543211', 'active')
-        ON DUPLICATE KEY UPDATE name = VALUES(name), plan_tier = VALUES(plan_tier);
+        ('acad-001', 'Achiever\'s Chess Academy', 'achievers', 'pro', '#f97316', '+919876543210', 7999.00, 'admin@achieverschess.com', 'Rajesh Kumar', 'active'),
+        ('acad-002', 'KnightSquad Club', 'knightsquad', 'enterprise', '#3b82f6', '+919876543211', 14999.00, 'contact@knightsquad.com', 'Vikas Anand', 'active'),
+        ('acad-003', 'Grandmaster Academy', 'grandmaster', 'pro', '#a855f7', '+919876543212', 7999.00, 'info@gmacademy.com', 'GM S. Rao', 'active'),
+        ('acad-004', 'ChessMasters India', 'chessmasters', 'enterprise', '#10b981', '+919876543213', 14999.00, 'admin@chessmasters.in', 'Arjun Nambiar', 'active'),
+        ('acad-005', 'Castle Chess School', 'castlechess', 'starter', '#f59e0b', '+919876543214', 3499.00, 'hello@castlechess.org', 'Sunita Roy', 'active'),
+        ('acad-006', 'Royal Bishop Club', 'royalbishop', 'pro', '#ec4899', '+919876543215', 7999.00, 'support@royalbishop.com', 'David Miller', 'active')
+        ON DUPLICATE KEY UPDATE 
+            name = VALUES(name), 
+            plan_tier = VALUES(plan_tier), 
+            monthly_billing = VALUES(monthly_billing), 
+            status = VALUES(status);
         ");
+
 
         // Seed Batches
         $pdo->exec("
