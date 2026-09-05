@@ -9,6 +9,7 @@ import { TournamentsModule } from './modules/TournamentsModule';
 import { AcademyModule } from './modules/AcademyModule';
 import { SaasOwnerModule } from './modules/SaasOwnerModule';
 import { CoachStaffModule } from './modules/CoachStaffModule';
+import { HomeworkModule } from './modules/HomeworkModule';
 import { LoginModal } from './components/LoginModal';
 import { AuthPortal } from './components/AuthPortal';
 import { AuthProvider, useAuth } from './services/authContext';
@@ -77,6 +78,8 @@ const MainAppContent: React.FC = () => {
       setActiveModule('faculty');
     } else if (user.role === 'head_coach' || user.role === 'assistant_coach') {
       setActiveModule('classroom');
+    } else if (user.role === 'student') {
+      setActiveModule('homework');
     }
   }, [user?.role]);
 
@@ -143,6 +146,7 @@ const MainAppContent: React.FC = () => {
           {activeModule === 'play' && <PlayModule />}
           {activeModule === 'puzzles' && <PuzzlesModule />}
           {activeModule === 'classroom' && <ClassroomModule />}
+          {activeModule === 'homework' && <HomeworkModule />}
           
           {activeModule === 'tournaments' && (
             user.role !== 'assistant_coach' ? (

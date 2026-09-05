@@ -136,5 +136,21 @@ export const DEMO_CREDENTIALS: DemoCredential[] = [
       'Grade and review tactical homework submissions',
       'Restricted: Cannot delete courses or edit billing'
     ]
+  },
+  {
+    role: 'student',
+    roleTitle: 'Academy Student (Batch Alpha)',
+    badge: 'Student',
+    name: 'Aarav Sharma',
+    email: 'student@achieverschess.com',
+    password: 'StudentPass#2026',
+    academyName: "Achiever's Chess Academy",
+    description: 'Enrolled in Batch Alpha. Can solve interactive chess homework, play simul drills, and attend live masterclasses.',
+    permissionsSummary: [
+      'Solve interactive tactical homework & drills',
+      'Attend live masterclasses and move on personal board',
+      'Track puzzle rating and drill completion history',
+      'Participate in academy Swiss tournaments'
+    ]
   }
 ];

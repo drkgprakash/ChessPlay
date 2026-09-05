@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Sparkles,
   Zap,
+  CheckSquare,
   X
 } from 'lucide-react';
 import { useAuth } from '../services/authContext';
@@ -98,7 +99,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: user.role === 'assistant_coach' ? 'Co-Pilot' : 'Simul 6',
       badgeColor: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
       group: 'classroom', 
-      allowedRoles: ['saas_owner', 'academy_admin', 'head_coach', 'assistant_coach'] 
+      allowedRoles: ['saas_owner', 'academy_admin', 'head_coach', 'assistant_coach', 'student'] 
+    },
+    { 
+      id: 'homework', 
+      label: 'Homework & Drills', 
+      shortLabel: 'Homework',
+      icon: CheckSquare, 
+      badge: 'Drills',
+      badgeColor: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+      group: 'classroom', 
+      allowedRoles: ['saas_owner', 'academy_admin', 'head_coach', 'assistant_coach', 'student'] 
     },
     { 
       id: 'tournaments', 
@@ -108,7 +119,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: 'Swiss',
       badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
       group: 'classroom', 
-      allowedRoles: ['saas_owner', 'academy_admin', 'head_coach'] 
+      allowedRoles: ['saas_owner', 'academy_admin', 'head_coach', 'student'] 
     },
 
     // 3. Engine & Training Studio

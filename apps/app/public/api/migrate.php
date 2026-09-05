@@ -208,6 +208,15 @@ if ($action === 'seed_auth' || $action === 'migrate') {
                 'role' => 'assistant_coach',
                 'academy_id' => 'acad-001',
                 'avatar' => '🧑‍🏫'
+            ],
+            [
+                'id' => 'usr-student-01',
+                'email' => 'student@achieverschess.com',
+                'password' => 'StudentPass#2026',
+                'name' => 'Aarav Sharma',
+                'role' => 'student',
+                'academy_id' => 'acad-001',
+                'avatar' => '👦'
             ]
         ];
 
@@ -314,9 +323,187 @@ if ($action === 'seed_auth' || $action === 'migrate') {
             $sbStmt->execute($sb);
         }
 
+        // 4. Interactive Homework & Drills Schema
+        $pdo->exec("
+        CREATE TABLE IF NOT EXISTS homework_assignments (
+            id VARCHAR(36) PRIMARY KEY,
+            academy_id VARCHAR(36) NOT NULL,
+            batch_id VARCHAR(36) NOT NULL,
+            created_by VARCHAR(36) NOT NULL,
+            title VARCHAR(150) NOT NULL,
+            description TEXT NULL,
+            due_date DATE NULL,
+            difficulty ENUM('Beginner', 'Intermediate', 'Advanced', 'Master') DEFAULT 'Intermediate',
+            status ENUM('active', 'archived') DEFAULT 'active',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+        CREATE TABLE IF NOT EXISTS homework_drills (
+            id VARCHAR(36) PRIMARY KEY,
+            assignment_id VARCHAR(36) NOT NULL,
+            order_idx INT DEFAULT 1,
+            title VARCHAR(150) NOT NULL,
+            theme VARCHAR(80) DEFAULT 'Tactics',
+            fen VARCHAR(150) NOT NULL,
+            initial_turn ENUM('w', 'b') DEFAULT 'w',
+            solution_moves JSON NOT NULL,
+            hint_piece VARCHAR(255) NULL,
+            hint_square VARCHAR(255) NULL,
+            hint_solution VARCHAR(255) NULL,
+            explanation TEXT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+        CREATE TABLE IF NOT EXISTS homework_submissions (
+            id VARCHAR(36) PRIMARY KEY,
+            assignment_id VARCHAR(36) NOT NULL,
+            student_id VARCHAR(36) NOT NULL,
+            drills_completed INT DEFAULT 0,
+            total_drills INT DEFAULT 1,
+            score_pct INT DEFAULT 0,
+            status ENUM('assigned', 'in_progress', 'completed', 'reviewed') DEFAULT 'assigned',
+            attempts_json JSON NULL,
+            coach_feedback TEXT NULL,
+            submitted_at TIMESTAMP NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_assign_student (assignment_id, student_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ");
+
+        // Seed Homework Assignments
+        $hwStmt = $pdo->prepare("
+            INSERT INTO homework_assignments (id, academy_id, batch_id, created_by, title, description, due_date, difficulty, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE title = VALUES(title), description = VALUES(description), due_date = VALUES(due_date);
+        ");
+
+        $hwStmt->execute([
+            'hw-01',
+            'acad-001',
+            'batch-01',
+            'usr-headcoach',
+            'Week 4: Essential Checkmate Batteries & Queen Deflections',
+            'Solve these 3 tactical puzzles focusing on recognizing queen checkmates, backward guards, and the Anastasia mating net. Review each position carefully before moving.',
+            date('Y-m-d', strtotime('+5 days')),
+            'Intermediate',
+            'active'
+        ]);
+
+        $hwStmt->execute([
+            'hw-02',
+            'acad-001',
+            'batch-01',
+            'usr-headcoach',
+            'Tactical Vision: Knight Forks & Pins',
+            'Mastering piece coordination and discovering royal knight tactics under pressure. Calculate all candidate moves.',
+            date('Y-m-d', strtotime('+8 days')),
+            'Intermediate',
+            'active'
+        ]);
+
+        // Seed Drills for hw-01
+        $drillStmt = $pdo->prepare("
+            INSERT INTO homework_drills (id, assignment_id, order_idx, title, theme, fen, initial_turn, solution_moves, hint_piece, hint_square, hint_solution, explanation)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE title = VALUES(title), fen = VALUES(fen), solution_moves = VALUES(solution_moves);
+        ");
+
+        $drillStmt->execute([
+            'hw-d-01',
+            'hw-01',
+            1,
+            'Smothered Mate Backward Guard',
+            'Checkmate Pattern',
+            '6k1/5ppp/8/8/8/5Q2/4NPPP/2r3K1 w - - 0 1',
+            'w',
+            json_encode(['Nxc1']),
+            'Look at your knight on e2.',
+            'Your knight can capture the black rook on c1.',
+            'Nxc1 eliminates the check and defends the king safely.',
+            'The black rook was delivering back-rank checkmate, but your knight has a backward tactical defense on c1.'
+        ]);
+
+        $drillStmt->execute([
+            'hw-d-02',
+            'hw-01',
+            2,
+            'Queen & Bishop Battery Mate',
+            'Mate in 1',
+            'r1bqkb1r/pppp1ppp/2n5/4p3/2B1n3/5Q2/PPPP1PPP/RNB1K1NR w KQkq - 0 5',
+            'w',
+            json_encode(['Qxf7#']),
+            'Your queen can coordinate with the bishop on c4.',
+            'Attack the weak f7 square right beside Black\'s king.',
+            'Qxf7# delivers an inescapable checkmate!',
+            'The f7 pawn is defended only by the king in early opening moves.'
+        ]);
+
+        $drillStmt->execute([
+            'hw-d-03',
+            'hw-01',
+            3,
+            'Anastasia Mating Net & Infiltration',
+            'Mating Net',
+            '5rk1/1p3ppp/pq2p3/3p4/8/1P3Q2/P1r2PPP/R4RK1 w - - 0 20',
+            'w',
+            json_encode(['Qd3']),
+            'Reposition your queen with tempo.',
+            'Attack the black rook on c2.',
+            'Qd3 attacks the infiltrated rook and gains control of the 3rd rank.',
+            'Centralizing the queen with tempo forces Black onto defense.'
+        ]);
+
+        // Seed Drills for hw-02
+        $drillStmt->execute([
+            'hw-d-04',
+            'hw-02',
+            1,
+            'Resolving the Central Pin',
+            'Pin & King Safety',
+            'r3k2r/pppq1ppp/3p1n2/4p3/1b2P3/2NP1N2/PPP2PPP/R1BQK2R w KQkq - 0 8',
+            'w',
+            json_encode(['O-O']),
+            'Prioritize king safety before advancing central pieces.',
+            'Castle kingside.',
+            'O-O resolves the pin on your c3 knight safely.',
+            'Castling eliminates tactical pin targets against your king.'
+        ]);
+
+        $drillStmt->execute([
+            'hw-d-05',
+            'hw-02',
+            2,
+            'Endgame King Activation',
+            'Endgame Tactics',
+            '4kb1r/p2n1ppp/4p3/1b1p4/3P4/2B1P3/PP3PPP/R3K1NR w KQk - 0 14',
+            'w',
+            json_encode(['Kd2']),
+            'Activate your king into the center.',
+            'Step to d2 to connect rooks.',
+            'Kd2 connects the rooks and readies the king for central control.',
+            'With queens off the board, the king transitions into an attacking weapon.'
+        ]);
+
+        // Seed Submissions for Batch Alpha Students
+        $subStmt = $pdo->prepare("
+            INSERT INTO homework_submissions (id, assignment_id, student_id, drills_completed, total_drills, score_pct, status, coach_feedback)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE drills_completed = VALUES(drills_completed), score_pct = VALUES(score_pct), status = VALUES(status), coach_feedback = VALUES(coach_feedback);
+        ");
+
+        $subStmt->execute(['sub-01', 'hw-01', 'st-1', 1, 3, 33, 'in_progress', null]);
+        $subStmt->execute(['sub-02', 'hw-01', 'st-2', 3, 3, 100, 'completed', null]);
+        $subStmt->execute(['sub-03', 'hw-01', 'st-3', 3, 3, 100, 'reviewed', 'Outstanding calculation speed and clean moves!']);
+        $subStmt->execute(['sub-04', 'hw-01', 'st-4', 0, 3, 0, 'assigned', null]);
+        $subStmt->execute(['sub-05', 'hw-01', 'st-5', 2, 3, 67, 'in_progress', null]);
+        $subStmt->execute(['sub-06', 'hw-01', 'st-6', 3, 3, 100, 'completed', null]);
+
+        // Ensure student st-1 has student@achieverschess.com email
+        $pdo->exec("UPDATE students SET email = 'student@achieverschess.com' WHERE id = 'st-1'");
+
         echo json_encode([
             'status' => 'success',
-            'message' => "Successfully seeded {$seededCount} secured user accounts and classroom real-time session with 6 simul boards",
+            'message' => "Successfully seeded {$seededCount} secured user accounts, classroom simul boards, and homework curricula",
             'demo_accounts' => array_map(function($u) {
                 return ['email' => $u['email'], 'role' => $u['role'], 'name' => $u['name']];
             }, $demoUsers)

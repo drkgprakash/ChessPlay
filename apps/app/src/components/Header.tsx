@@ -13,7 +13,8 @@ import {
   Puzzle,
   Swords,
   Sparkles,
-  Zap
+  Zap,
+  CheckSquare
 } from 'lucide-react';
 import { useAuth } from '../services/authContext';
 
@@ -23,6 +24,7 @@ export type AppModule =
   | 'play' 
   | 'puzzles' 
   | 'classroom' 
+  | 'homework'
   | 'tournaments' 
   | 'academy'
   | 'faculty';
@@ -55,6 +57,13 @@ const MODULE_META: Record<AppModule, { title: string; subtitle: string; icon: Re
     icon: GraduationCap,
     badge: 'Live Signaling',
     badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+  },
+  homework: {
+    title: 'Batch Homework & Tactical Drills',
+    subtitle: 'Interactive puzzle assignments, auto-grading & student progress',
+    icon: CheckSquare,
+    badge: 'Drills',
+    badgeColor: 'bg-orange-500/20 text-orange-400 border-orange-500/30'
   },
   academy: {
     title: 'Academy Management LMS',
