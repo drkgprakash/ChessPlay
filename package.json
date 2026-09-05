@@ -1,0 +1,13 @@
+{
+  "name": "chessplay-monorepo",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev:app": "cd apps/app && npm run dev",
+    "dev:web": "cd apps/web && npm run dev",
+    "build:app": "cd apps/app && npm run build",
+    "build:web": "cd apps/web && npm run build",
+    "build:all": "npm run build:app && npm run build:web",
+    "package:deploy": "bash deploy/package_deploy.sh"
+  }
+}
