@@ -716,9 +716,121 @@ if ($action === 'seed_auth' || $action === 'migrate') {
         $attStmt->execute(['att-05', 'acad-001', 'batch-01', 'st-5', $todayDate, '18:18:45', 'late', 'qr_scan', 'usr-headcoach', 'Arrived 18 mins late due to rain traffic']);
         $attStmt->execute(['att-06', 'acad-001', 'batch-01', 'st-6', $todayDate, '18:01:05', 'present', 'qr_scan', 'usr-headcoach', 'Digital QR scanned at door entrance']);
 
+        // 9. Tournament Organizer & FIDE Swiss Pairings Engine Schema
+        $pdo->exec("
+        CREATE TABLE IF NOT EXISTS tournaments (
+            id VARCHAR(36) PRIMARY KEY,
+            academy_id VARCHAR(36) NOT NULL,
+            batch_id VARCHAR(36) NULL,
+            title VARCHAR(150) NOT NULL,
+            format ENUM('swiss', 'round_robin', 'arena') DEFAULT 'swiss',
+            time_control VARCHAR(50) DEFAULT '10m + 5s Rapid',
+            total_rounds INT DEFAULT 5,
+            current_round INT DEFAULT 3,
+            status ENUM('upcoming', 'in_progress', 'completed') DEFAULT 'in_progress',
+            created_by VARCHAR(36) NOT NULL,
+            scheduled_at DATETIME NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_tourn_acad (academy_id, status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+        CREATE TABLE IF NOT EXISTS tournament_participants (
+            id VARCHAR(36) PRIMARY KEY,
+            tournament_id VARCHAR(36) NOT NULL,
+            student_id VARCHAR(36) NOT NULL,
+            score DECIMAL(3,1) DEFAULT 0.0,
+            buchholz DECIMAL(4,1) DEFAULT 0.0,
+            sonneborn_berger DECIMAL(4,1) DEFAULT 0.0,
+            rank INT DEFAULT 1,
+            streak INT DEFAULT 0,
+            performance_rating INT DEFAULT 1400,
+            color_history VARCHAR(50) DEFAULT '',
+            opponents_played JSON NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uk_tourn_student (tournament_id, student_id),
+            INDEX idx_part_score (tournament_id, score)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+        CREATE TABLE IF NOT EXISTS tournament_matches (
+            id VARCHAR(36) PRIMARY KEY,
+            tournament_id VARCHAR(36) NOT NULL,
+            round_number INT NOT NULL,
+            table_number INT NOT NULL,
+            white_student_id VARCHAR(36) NOT NULL,
+            black_student_id VARCHAR(36) NULL,
+            result ENUM('pending', '1-0', '0-1', '1/2-1/2', '1-0F', '0-1F') DEFAULT 'pending',
+            played_at DATETIME NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uk_match (tournament_id, round_number, table_number),
+            INDEX idx_match_round (tournament_id, round_number)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ");
+
+        // Seed Active Tournament
+        $tournStmt = $pdo->prepare("
+            INSERT INTO tournaments (id, academy_id, batch_id, title, format, time_control, total_rounds, current_round, status, created_by, scheduled_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE title = VALUES(title), current_round = VALUES(current_round), status = VALUES(status);
+        ");
+        $tournStmt->execute([
+            'tourn-01', 'acad-001', 'batch-01', 'Sunday Rapid Grand Prix — September Edition',
+            'swiss', '10m + 5s Rapid', 5, 3, 'in_progress', 'usr-headcoach', date('Y-m-d 10:00:00')
+        ]);
+
+        // Seed Participants
+        $partStmt = $pdo->prepare("
+            INSERT INTO tournament_participants (id, tournament_id, student_id, score, buchholz, sonneborn_berger, rank, streak, performance_rating, color_history, opponents_played)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE 
+                score = VALUES(score),
+                buchholz = VALUES(buchholz),
+                sonneborn_berger = VALUES(sonneborn_berger),
+                rank = VALUES(rank),
+                streak = VALUES(streak),
+                performance_rating = VALUES(performance_rating);
+        ");
+
+        $participants = [
+            ['part-01', 'tourn-01', 'st-1', 2.5, 4.5, 3.75, 1, 2, 1780, 'W,B,W', json_encode(['st-5', 'st-2'])],
+            ['part-02', 'tourn-01', 'st-2', 2.0, 4.0, 3.00, 2, 1, 1690, 'W,W,B', json_encode(['st-4', 'st-1'])],
+            ['part-03', 'tourn-01', 'st-3', 2.0, 3.5, 2.50, 3, 1, 1650, 'W,B,B', json_encode(['st-6', 'st-5'])],
+            ['part-04', 'tourn-01', 'st-5', 1.5, 4.0, 1.75, 4, 0, 1510, 'B,W,W', json_encode(['st-1', 'st-3'])],
+            ['part-05', 'tourn-01', 'st-4', 1.0, 3.5, 1.00, 5, 0, 1420, 'B,W,B', json_encode(['st-2', 'st-6'])],
+            ['part-06', 'tourn-01', 'st-6', 1.0, 3.0, 0.75, 6, 0, 1390, 'B,B,W', json_encode(['st-3', 'st-4'])]
+        ];
+
+        foreach ($participants as $p) {
+            $partStmt->execute($p);
+        }
+
+        // Seed Matches for Rounds 1, 2, and 3
+        $matchStmt = $pdo->prepare("
+            INSERT INTO tournament_matches (id, tournament_id, round_number, table_number, white_student_id, black_student_id, result, played_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE result = VALUES(result);
+        ");
+
+        // Round 1 (Completed)
+        $matchStmt->execute(['m-1-1', 'tourn-01', 1, 1, 'st-1', 'st-5', '1-0', date('Y-m-d 10:15:00')]);
+        $matchStmt->execute(['m-1-2', 'tourn-01', 1, 2, 'st-2', 'st-4', '1-0', date('Y-m-d 10:15:00')]);
+        $matchStmt->execute(['m-1-3', 'tourn-01', 1, 3, 'st-3', 'st-6', '1-0', date('Y-m-d 10:15:00')]);
+
+        // Round 2 (Completed)
+        $matchStmt->execute(['m-2-1', 'tourn-01', 2, 1, 'st-2', 'st-1', '1/2-1/2', date('Y-m-d 10:45:00')]);
+        $matchStmt->execute(['m-2-2', 'tourn-01', 2, 2, 'st-5', 'st-3', '0-1', date('Y-m-d 10:45:00')]);
+        $matchStmt->execute(['m-2-3', 'tourn-01', 2, 3, 'st-4', 'st-6', '0-1', date('Y-m-d 10:45:00')]);
+
+        // Round 3 (In Progress / Pending results)
+        $matchStmt->execute(['m-3-1', 'tourn-01', 3, 1, 'st-1', 'st-3', 'pending', NULL]);
+        $matchStmt->execute(['m-3-2', 'tourn-01', 3, 2, 'st-6', 'st-2', 'pending', NULL]);
+        $matchStmt->execute(['m-3-3', 'tourn-01', 3, 3, 'st-5', 'st-4', 'pending', NULL]);
+
         echo json_encode([
             'status' => 'success',
-            'message' => "Successfully seeded {$seededCount} secured user accounts, classroom simul boards, homework curricula, student performance reports, fee billing, and QR attendance ledger",
+            'message' => "Successfully seeded {$seededCount} secured user accounts, classroom simul boards, homework curricula, student performance reports, fee billing, QR attendance, and Swiss tournament organizer",
             'demo_accounts' => array_map(function($u) {
                 return ['email' => $u['email'], 'role' => $u['role'], 'name' => $u['name']];
             }, $demoUsers)
