@@ -43,9 +43,9 @@ export const LoginModal: React.FC = () => {
             </div>
             <div>
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                Secured Auth & Role-Based Access Control (RBAC)
+                Role & Permissions Overview
               </h2>
-              <p className="text-xs text-zinc-400">256-Bit Token Authentication & Role-Based Permissions</p>
+              <p className="text-xs text-zinc-400">Manage active role profile and access privileges</p>
             </div>
           </div>
           <button
@@ -243,7 +243,7 @@ export const LoginModal: React.FC = () => {
         {/* Footer */}
         <div className="px-6 py-4 bg-zinc-950 border-t border-zinc-800 flex items-center justify-between">
           <span className="text-[11px] text-zinc-500 font-mono flex items-center gap-1.5">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> 256-Bit SSL Encrypted Session
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> Session Active & Protected
           </span>
           <button
             onClick={() => setLoginModalOpen(false)}
