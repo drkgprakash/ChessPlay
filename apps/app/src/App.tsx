@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Header, AppModule } from './components/Header';
+import { Sidebar } from './components/Sidebar';
 import { AnalysisModule } from './modules/AnalysisModule';
 import { PlayModule } from './modules/PlayModule';
 import { PuzzlesModule } from './modules/PuzzlesModule';
@@ -58,6 +59,14 @@ const AccessDeniedView: React.FC<{ moduleName: string; requiredRole: string }> =
 const MainAppContent: React.FC = () => {
   const { user, isLoading } = useAuth();
   const [activeModule, setActiveModule] = useState<AppModule>('classroom');
+  const [isPinned, setIsPinned] = useState<boolean>(() => {
+    return localStorage.getItem('chessplay_sidebar_pinned') === 'true';
+  });
+  const [isMobileOpen, setIsMobileOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    localStorage.setItem('chessplay_sidebar_pinned', isPinned ? 'true' : 'false');
+  }, [isPinned]);
 
   // Adjust default landing view based on authenticated role
   useEffect(() => {
@@ -91,65 +100,85 @@ const MainAppContent: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-zinc-100 flex flex-col font-sans selection:bg-orange-500/30 selection:text-orange-200">
-      <Header activeModule={activeModule} setActiveModule={setActiveModule} />
+    <div className="min-h-screen bg-[#09090b] text-zinc-100 flex font-sans selection:bg-orange-500/30 selection:text-orange-200">
+      {/* Collapsible Luxury Sidebar with Hover Expansion */}
+      <Sidebar
+        activeModule={activeModule}
+        setActiveModule={setActiveModule}
+        isPinned={isPinned}
+        setIsPinned={setIsPinned}
+        isMobileOpen={isMobileOpen}
+        setIsMobileOpen={setIsMobileOpen}
+      />
 
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {activeModule === 'owner_overview' && (
-          user.role === 'saas_owner' ? (
-            <SaasOwnerModule />
-          ) : (
-            <AccessDeniedView moduleName="SaaS Platform Command Center" requiredRole="SaaS Owner (Superadmin)" />
-          )
-        )}
+      {/* Main App Viewport */}
+      <div className={`flex-1 flex flex-col min-h-screen transition-all duration-300 ease-out ${
+        isPinned ? 'lg:pl-64' : 'lg:pl-[72px]'
+      }`}>
+        <Header 
+          activeModule={activeModule} 
+          setActiveModule={setActiveModule}
+          isMobileOpen={isMobileOpen}
+          setIsMobileOpen={setIsMobileOpen}
+        />
 
-        {activeModule === 'faculty' && (
-          user.role === 'saas_owner' || user.role === 'academy_admin' ? (
-            <CoachStaffModule />
-          ) : (
-            <AccessDeniedView moduleName="Coaches & Staff Management" requiredRole="Academy Admin or SaaS Owner" />
-          )
-        )}
+        <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          {activeModule === 'owner_overview' && (
+            user.role === 'saas_owner' ? (
+              <SaasOwnerModule />
+            ) : (
+              <AccessDeniedView moduleName="SaaS Platform Command Center" requiredRole="SaaS Owner (Superadmin)" />
+            )
+          )}
 
-        {activeModule === 'analysis' && <AnalysisModule />}
-        {activeModule === 'play' && <PlayModule />}
-        {activeModule === 'puzzles' && <PuzzlesModule />}
-        {activeModule === 'classroom' && <ClassroomModule />}
-        
-        {activeModule === 'tournaments' && (
-          user.role !== 'assistant_coach' ? (
-            <TournamentsModule />
-          ) : (
-            <AccessDeniedView moduleName="Tournament Master Control" requiredRole="Head Coach, Academy Admin or SaaS Owner" />
-          )
-        )}
+          {activeModule === 'faculty' && (
+            user.role === 'saas_owner' || user.role === 'academy_admin' ? (
+              <CoachStaffModule />
+            ) : (
+              <AccessDeniedView moduleName="Coaches & Staff Management" requiredRole="Academy Admin or SaaS Owner" />
+            )
+          )}
 
-        {activeModule === 'academy' && <AcademyModule />}
-      </main>
+          {activeModule === 'analysis' && <AnalysisModule />}
+          {activeModule === 'play' && <PlayModule />}
+          {activeModule === 'puzzles' && <PuzzlesModule />}
+          {activeModule === 'classroom' && <ClassroomModule />}
+          
+          {activeModule === 'tournaments' && (
+            user.role !== 'assistant_coach' ? (
+              <TournamentsModule />
+            ) : (
+              <AccessDeniedView moduleName="Tournament Master Control" requiredRole="Head Coach, Academy Admin or SaaS Owner" />
+            )
+          )}
 
-      <LoginModal />
+          {activeModule === 'academy' && <AcademyModule />}
+        </main>
 
-      {/* Enterprise SaaS Footer */}
-      <footer className="border-t border-zinc-800/80 bg-zinc-950/80 backdrop-blur-xl py-6">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-zinc-500">
-          <div className="flex items-center gap-2.5">
-            <div className="w-5 h-5 rounded-md bg-orange-500/15 flex items-center justify-center text-orange-400 text-xs font-black">
-              ♞
+        <LoginModal />
+
+        {/* Enterprise SaaS Footer */}
+        <footer className="border-t border-zinc-800/80 bg-zinc-950/80 backdrop-blur-xl py-6 mt-auto">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-zinc-500">
+            <div className="flex items-center gap-2.5">
+              <div className="w-5 h-5 rounded-md bg-orange-500/15 flex items-center justify-center text-orange-400 text-xs font-black">
+                ♞
+              </div>
+              <span className="font-bold text-zinc-300">ChessPlay</span>
+              <span>•</span>
+              <span className="text-zinc-500">Enterprise Chess Academy Operating System</span>
             </div>
-            <span className="font-bold text-zinc-300">ChessPlay</span>
-            <span>•</span>
-            <span className="text-zinc-500">Enterprise Chess Academy Operating System</span>
+            <div className="flex items-center gap-4 text-zinc-500 text-[11px]">
+              <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                All Systems Operational
+              </span>
+              <span>•</span>
+              <span>© 2026 Chess Play Inc.</span>
+            </div>
           </div>
-          <div className="flex items-center gap-4 text-zinc-500 text-[11px]">
-            <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              All Systems Operational
-            </span>
-            <span>•</span>
-            <span>© 2026 Chess Play Inc.</span>
-          </div>
-        </div>
-      </footer>
+        </footer>
+      </div>
     </div>
   );
 };
@@ -163,3 +192,4 @@ export const App: React.FC = () => {
 };
 
 export default App;
+
