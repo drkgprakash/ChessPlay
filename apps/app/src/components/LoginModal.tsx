@@ -1,0 +1,171 @@
+import React, { useState } from 'react';
+import { X, ShieldCheck, KeyRound, CheckCircle2, User, ArrowRight, Sparkles, Building2 } from 'lucide-react';
+import { useAuth } from '../services/authContext';
+import { DEMO_CREDENTIALS, UserRole } from '../types/auth';
+
+export const LoginModal: React.FC = () => {
+  const { isLoginModalOpen, setLoginModalOpen, user, quickSwitchRole, login } = useAuth();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  if (!isLoginModalOpen) return null;
+
+  const handleManualLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    const success = login(email, password);
+    if (!success) {
+      setError('Invalid email or password. Please use the demo credentials below.');
+    } else {
+      setError(null);
+    }
+  };
+
+  const selectDemoAccount = (role: UserRole) => {
+    const cred = DEMO_CREDENTIALS.find(c => c.role === role);
+    if (cred) {
+      setEmail(cred.email);
+      setPassword(cred.password);
+      quickSwitchRole(role);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
+      <div className="bg-zinc-900 border border-zinc-700 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+        {/* Header */}
+        <div className="px-6 py-5 bg-gradient-to-r from-orange-950/50 via-zinc-900 to-zinc-900 border-b border-zinc-800 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-orange-500/20 text-orange-400 flex items-center justify-center text-xl">
+              🔐
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                Role-Based Access Control (RBAC)
+              </h2>
+              <p className="text-xs text-zinc-400">Select any distinct role below to test its customized permission set</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setLoginModalOpen(false)}
+            className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Modal Body */}
+        <div className="p-6 overflow-y-auto space-y-6">
+          {/* Current Active Account Indicator */}
+          <div className="p-3.5 rounded-2xl bg-zinc-950 border border-zinc-800 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">{user.avatar}</span>
+              <div>
+                <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">Logged In As</span>
+                <div className="text-sm font-bold text-white flex items-center gap-2">
+                  {user.name}
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 font-mono font-bold">
+                    {user.role.toUpperCase().replace('_', ' ')}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <span className="text-xs text-zinc-400 font-mono">{user.email}</span>
+          </div>
+
+          {/* 4 Demo Roles Grid */}
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-3 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-orange-400" /> One-Click Role Switcher (No Password Required)
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {DEMO_CREDENTIALS.map((cred) => (
+                <div
+                  key={cred.role}
+                  onClick={() => selectDemoAccount(cred.role)}
+                  className={`p-4 rounded-2xl border text-left cursor-pointer transition flex flex-col justify-between ${
+                    user.role === cred.role
+                      ? 'bg-orange-500/10 border-orange-500 shadow-md'
+                      : 'bg-zinc-950/60 border-zinc-800 hover:border-zinc-700 hover:bg-zinc-950'
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-lg">
+                        {cred.role === 'saas_owner' ? '👑' : cred.role === 'academy_admin' ? '🏛️' : cred.role === 'head_coach' ? '👨‍🏫' : '🧑‍🏫'}
+                      </span>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          cred.role === 'saas_owner'
+                            ? 'bg-purple-500/20 text-purple-400'
+                            : cred.role === 'academy_admin'
+                            ? 'bg-blue-500/20 text-blue-400'
+                            : cred.role === 'head_coach'
+                            ? 'bg-orange-500/20 text-orange-400'
+                            : 'bg-emerald-500/20 text-emerald-400'
+                        }`}
+                      >
+                        {cred.badge}
+                      </span>
+                    </div>
+
+                    <h4 className="text-xs font-bold text-white">{cred.roleTitle}</h4>
+                    <p className="text-[11px] text-zinc-400 mt-1 leading-snug">{cred.description}</p>
+                  </div>
+
+                  <div className="mt-3 pt-3 border-t border-zinc-800/80 flex items-center justify-between">
+                    <span className="text-[10px] text-zinc-500 font-mono truncate max-w-[170px]">
+                      {cred.email}
+                    </span>
+                    <button
+                      type="button"
+                      className="text-[11px] font-bold text-orange-400 hover:underline flex items-center gap-1"
+                    >
+                      {user.role === cred.role ? 'Active ✓' : 'Switch →'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Permissions Matrix Comparison */}
+          <div className="border border-zinc-800 rounded-2xl p-4 bg-zinc-950/50">
+            <h4 className="text-xs font-bold text-zinc-200 mb-3 flex items-center gap-1.5">
+              <ShieldCheck className="w-4 h-4 text-emerald-400" /> Permission Scope by Role
+            </h4>
+            <div className="space-y-2 text-xs font-mono">
+              <div className="flex items-center justify-between text-zinc-300">
+                <span>Platform Analytics & All Academies</span>
+                <span className="text-purple-400 font-bold">SaaS Owner Only</span>
+              </div>
+              <div className="flex items-center justify-between text-zinc-300">
+                <span>Manage Coaches, Branches & Academy Billing</span>
+                <span className="text-blue-400 font-bold">Admin Only</span>
+              </div>
+              <div className="flex items-center justify-between text-zinc-300">
+                <span>Master Classroom & 6-Board Simul Grid</span>
+                <span className="text-orange-400 font-bold">Head Coach & Admin</span>
+              </div>
+              <div className="flex items-center justify-between text-zinc-300">
+                <span>Take Attendance & Grade Homework</span>
+                <span className="text-emerald-400 font-bold">All Coaches</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 bg-zinc-950 border-t border-zinc-800 flex justify-end">
+          <button
+            onClick={() => setLoginModalOpen(false)}
+            className="px-6 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 font-bold text-xs text-white transition shadow-lg shadow-orange-500/20"
+          >
+            Close / Continue as {user.name}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
