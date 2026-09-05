@@ -604,9 +604,83 @@ if ($action === 'seed_auth' || $action === 'migrate') {
             'Rohan is our top performer this month. Cross-table simul results demonstrate clear Candidate Master potential!'
         ]);
 
+        // 7. Student Fee Billing & Automated Invoicing Ledger Schema
+        $pdo->exec("
+        CREATE TABLE IF NOT EXISTS student_fees (
+            id VARCHAR(36) PRIMARY KEY,
+            student_id VARCHAR(36) NOT NULL,
+            academy_id VARCHAR(36) NOT NULL,
+            batch_id VARCHAR(36) NOT NULL,
+            invoice_number VARCHAR(50) NOT NULL UNIQUE,
+            billing_period VARCHAR(50) NOT NULL,
+            amount DECIMAL(10,2) NOT NULL DEFAULT 3500.00,
+            discount DECIMAL(10,2) DEFAULT 0.00,
+            tax DECIMAL(10,2) DEFAULT 0.00,
+            total_amount DECIMAL(10,2) NOT NULL DEFAULT 3500.00,
+            due_date DATE NOT NULL,
+            paid_date DATETIME NULL,
+            payment_method ENUM('upi', 'netbanking', 'cash', 'card', 'cheque') NULL,
+            transaction_ref VARCHAR(100) NULL,
+            status ENUM('paid', 'pending', 'overdue', 'waived') DEFAULT 'pending',
+            notes TEXT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_student_fees (student_id, academy_id, billing_period)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ");
+
+        // Seed September 2026 Invoices for Batch Alpha
+        $feeStmt = $pdo->prepare("
+            INSERT INTO student_fees (id, student_id, academy_id, batch_id, invoice_number, billing_period, amount, discount, tax, total_amount, due_date, paid_date, payment_method, transaction_ref, status, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE 
+                amount = VALUES(amount),
+                total_amount = VALUES(total_amount),
+                status = VALUES(status),
+                payment_method = VALUES(payment_method),
+                transaction_ref = VALUES(transaction_ref),
+                paid_date = VALUES(paid_date);
+        ");
+
+        $feeStmt->execute([
+            'fee-01', 'st-1', 'acad-001', 'batch-01', 'INV-2026-0901', 'September 2026',
+            3500.00, 0.00, 0.00, 3500.00, '2026-09-05', '2026-09-02 14:30:00',
+            'upi', 'UPI/624918294/HDFC', 'paid', 'Tuition fee received via GooglePay UPI'
+        ]);
+
+        $feeStmt->execute([
+            'fee-02', 'st-2', 'acad-001', 'batch-01', 'INV-2026-0902', 'September 2026',
+            3500.00, 0.00, 0.00, 3500.00, '2026-09-05', '2026-09-03 11:15:00',
+            'netbanking', 'NEFT/92019481/ICICI', 'paid', 'Direct NEFT transfer verified by accounts'
+        ]);
+
+        $feeStmt->execute([
+            'fee-03', 'st-3', 'acad-001', 'batch-01', 'INV-2026-0903', 'September 2026',
+            3500.00, 0.00, 0.00, 3500.00, '2026-09-05', '2026-09-04 16:45:00',
+            'upi', 'UPI/829104812/SBI', 'paid', 'PhonePe UPI transfer received'
+        ]);
+
+        $feeStmt->execute([
+            'fee-04', 'st-4', 'acad-001', 'batch-01', 'INV-2026-0904', 'September 2026',
+            3500.00, 0.00, 0.00, 3500.00, '2026-09-10', NULL,
+            NULL, NULL, 'pending', 'Invoice sent to parent WhatsApp. Due Sep 10.'
+        ]);
+
+        $feeStmt->execute([
+            'fee-05', 'st-5', 'acad-001', 'batch-01', 'INV-2026-0905', 'September 2026',
+            3500.00, 0.00, 0.00, 3500.00, '2026-09-01', NULL,
+            NULL, NULL, 'overdue', 'Due date elapsed. WhatsApp fee reminder pending.'
+        ]);
+
+        $feeStmt->execute([
+            'fee-06', 'st-6', 'acad-001', 'batch-01', 'INV-2026-0906', 'September 2026',
+            3500.00, 0.00, 0.00, 3500.00, '2026-09-05', '2026-09-01 18:00:00',
+            'cash', 'REC-CASH-081', 'paid', 'Cash deposited at academy desk receipt #81'
+        ]);
+
         echo json_encode([
             'status' => 'success',
-            'message' => "Successfully seeded {$seededCount} secured user accounts, classroom simul boards, homework curricula, and student performance reports",
+            'message' => "Successfully seeded {$seededCount} secured user accounts, classroom simul boards, homework curricula, student performance reports, and fee billing ledger",
             'demo_accounts' => array_map(function($u) {
                 return ['email' => $u['email'], 'role' => $u['role'], 'name' => $u['name']];
             }, $demoUsers)

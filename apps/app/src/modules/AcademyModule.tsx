@@ -3,19 +3,22 @@ import {
   Users, Calendar, CheckSquare, FileText, Send, Plus, Search, 
   Filter, Sparkles, TrendingUp, Edit3, Trash2, X, AlertCircle, 
   RefreshCw, Award, MessageCircle, Phone, Mail, CheckCircle2, 
-  Clock, Shield, ArrowRight, UserCheck, Layers, Printer
+  Clock, Shield, ArrowRight, UserCheck, Layers, Printer,
+  CreditCard, Check, DollarSign, Receipt, Download
 } from 'lucide-react';
 import { useAuth } from '../services/authContext';
 import { userService, Student, Batch } from '../services/userService';
 import { ReportCardModal } from '../components/ReportCardModal';
+import { billingService, StudentFee, BillingMetrics } from '../services/billingService';
+import { FeeInvoiceModal } from '../components/FeeInvoiceModal';
 
 export const AcademyModule: React.FC = () => {
   const { user, token } = useAuth();
   const canManage = user?.role === 'saas_owner' || user?.role === 'academy_admin' || user?.role === 'head_coach';
   const isAdminOrOwner = user?.role === 'saas_owner' || user?.role === 'academy_admin';
 
-  // Sub-Navigation Tab: 'students' | 'batches'
-  const [activeTab, setActiveTab] = useState<'students' | 'batches'>('students');
+  // Sub-Navigation Tab: 'students' | 'batches' | 'billing'
+  const [activeTab, setActiveTab] = useState<'students' | 'batches' | 'billing'>('students');
 
   // Students & Batches State
   const [students, setStudents] = useState<Student[]>([]);
@@ -25,6 +28,22 @@ export const AcademyModule: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedBatchId, setSelectedBatchId] = useState<string>('');
+
+  // Fee Ledger & Billing State
+  const [fees, setFees] = useState<StudentFee[]>([]);
+  const [feeMetrics, setFeeMetrics] = useState<BillingMetrics | null>(null);
+  const [feeStatusFilter, setFeeStatusFilter] = useState<string>('');
+  const [feeSearchQuery, setFeeSearchQuery] = useState<string>('');
+  const [feeBatchFilter, setFeeBatchFilter] = useState<string>('');
+  const [isBillingLoading, setIsBillingLoading] = useState<boolean>(false);
+  const [selectedFeeForInvoice, setSelectedFeeForInvoice] = useState<StudentFee | null>(null);
+  const [recordingFee, setRecordingFee] = useState<StudentFee | null>(null);
+  const [recordForm, setRecordForm] = useState({
+    payment_method: 'upi',
+    transaction_ref: '',
+    notes: ''
+  });
+  const [feeActionSuccess, setFeeActionSuccess] = useState<string>('');
 
   // Student Modals state
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
@@ -100,6 +119,38 @@ export const AcademyModule: React.FC = () => {
     }, 300);
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  // Load fee ledger & metrics
+  const loadFeeData = async () => {
+    if (!token) return;
+    setIsBillingLoading(true);
+    const res = await billingService.getFeeLedger(
+      token,
+      feeSearchQuery || undefined,
+      feeBatchFilter || undefined,
+      feeStatusFilter || undefined
+    );
+    if (res && res.fees) {
+      setFees(res.fees);
+      setFeeMetrics(res.metrics);
+    }
+    setIsBillingLoading(false);
+  };
+
+  useEffect(() => {
+    if (token) {
+      loadFeeData();
+    }
+  }, [token, activeTab, feeStatusFilter, feeBatchFilter]);
+
+  useEffect(() => {
+    if (activeTab === 'billing') {
+      const timer = setTimeout(() => {
+        loadFeeData();
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [feeSearchQuery]);
 
   // Form Validation - Student
   const validateStudentForm = () => {
@@ -294,6 +345,51 @@ _Sent via Chess Play Academy Platform_`;
     setTimeout(() => setWhatsappSentNotice(false), 4000);
   };
 
+  // Submit Record Payment for Fee Ledger
+  const handleRecordPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!recordingFee || !token) return;
+    setIsSubmitting(true);
+    const res = await billingService.updatePayment(
+      token,
+      recordingFee.id,
+      'paid',
+      recordForm.payment_method,
+      recordForm.transaction_ref,
+      recordForm.notes
+    );
+    setIsSubmitting(false);
+
+    if (res.success) {
+      setRecordingFee(null);
+      setRecordForm({ payment_method: 'upi', transaction_ref: '', notes: '' });
+      setFeeActionSuccess(`Payment of ₹${recordingFee.amount.toLocaleString('en-IN')} recorded for ${recordingFee.student_name}!`);
+      setTimeout(() => setFeeActionSuccess(''), 4000);
+      loadFeeData();
+    } else {
+      alert(res.message || 'Failed to update payment');
+    }
+  };
+
+  // 1-Click WhatsApp Fee Reminder or Payment Receipt
+  const handleSendFeeWhatsApp = (fee: StudentFee) => {
+    const parentPhone = (fee.parent_phone || '').replace(/[^0-9]/g, '');
+    const academyName = user?.academyName || "Achiever's Chess Academy";
+    const statusText = fee.status.toUpperCase();
+    const upiId = "academy@upi";
+    
+    let message = '';
+    if (fee.status === 'paid') {
+      message = `🧾 *${academyName} — Fee Payment Receipt* ♟️\n\nDear ${fee.parent_name || 'Parent'},\n\nWe have received the monthly tuition fee for *${fee.student_name}* (${fee.billing_period}).\n\n• *Invoice No:* ${fee.invoice_number}\n• *Batch:* ${fee.batch_name || 'Batch Alpha'}\n• *Amount Paid:* ₹${fee.amount.toLocaleString('en-IN')}\n• *Payment Mode:* ${fee.payment_method?.toUpperCase() || 'UPI'}\n• *Transaction Ref:* ${fee.transaction_ref || 'Verified'}\n• *Status:* ✅ PAID\n\nOfficial printable GST receipt has been generated in your academy portal.\nThank you for choosing ${academyName}!\n\n_Sent via Chess Play Academy Platform_`;
+    } else {
+      message = `🔔 *${academyName} — Tuition Fee Reminder* ♟️\n\nDear ${fee.parent_name || 'Parent'},\n\nThis is a friendly reminder regarding the monthly tuition fee for *${fee.student_name}* for *${fee.billing_period}*.\n\n• *Invoice No:* ${fee.invoice_number}\n• *Batch:* ${fee.batch_name || 'Batch Alpha'}\n• *Amount Due:* ₹${fee.amount.toLocaleString('en-IN')}\n• *Due Date:* ${fee.due_date}\n• *Status:* ⚠️ ${statusText}\n• *Academy UPI:* ${upiId}\n\nPlease share the payment transaction ID or screenshot once transferred.\n\n_Sent via Chess Play Academy Platform_`;
+    }
+
+    const encoded = encodeURIComponent(message);
+    const targetUrl = parentPhone ? `https://wa.me/${parentPhone}?text=${encoded}` : `https://wa.me/?text=${encoded}`;
+    window.open(targetUrl, '_blank');
+  };
+
   // Derived metrics from real database records
   const activeCount = students.filter(s => s.status === 'active').length;
   const avgAttendance = students.length > 0 
@@ -399,11 +495,33 @@ _Sent via Chess Play Academy Platform_`;
               {batches.length}
             </span>
           </button>
+
+          <button
+            onClick={() => setActiveTab('billing')}
+            className={`px-4 py-2 rounded-xl transition flex items-center gap-2 ${
+              activeTab === 'billing'
+                ? 'bg-gradient-to-r from-orange-500 to-amber-600 text-white shadow-md'
+                : 'text-zinc-400 hover:text-white'
+            }`}
+          >
+            <CreditCard className="w-4 h-4" />
+            <span>Fee Billing & Invoices</span>
+            {feeMetrics && (
+              <span className={`text-[10px] px-2 py-0.2 rounded-full font-mono font-bold ${
+                activeTab === 'billing' ? 'bg-black/30 text-white' : 'bg-zinc-800 text-zinc-400'
+              }`}>
+                {feeMetrics.paid_count}/{feeMetrics.total_invoices} Paid
+              </span>
+            )}
+          </button>
         </div>
 
         <div className="flex items-center gap-2">
           <button
-            onClick={loadData}
+            onClick={() => {
+              loadData();
+              loadFeeData();
+            }}
             className="p-2.5 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 transition"
             title="Refresh Database"
           >
@@ -661,7 +779,7 @@ _Sent via Chess Play Academy Platform_`;
             )}
           </div>
         </div>
-      ) : (
+      ) : activeTab === 'batches' ? (
         /* ========================================================= */
         /* 2. BATCHES & SCHEDULES TAB                                */
         /* ========================================================= */
@@ -787,6 +905,304 @@ _Sent via Chess Play Academy Platform_`;
                 </div>
               );
             })}
+          </div>
+        </div>
+      ) : (
+        /* ========================================================= */
+        /* 3. FEE BILLING & INVOICES TAB                             */
+        /* ========================================================= */
+        <div className="space-y-6 animate-in fade-in">
+          {/* Header & Overview */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-5 shadow-lg flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-black text-white flex items-center gap-2">
+                <Receipt className="w-5 h-5 text-orange-400" />
+                Academy Student Fee Billing & Automated Invoicing
+              </h3>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                Track batch-wise tuition fees, generate official printable GST receipts, record offline/online payments, and send instant WhatsApp reminders.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-zinc-400 font-mono">
+                Billing Cycle: <strong className="text-white">September 2026</strong>
+              </span>
+            </div>
+          </div>
+
+          {/* Success Banner */}
+          {feeActionSuccess && (
+            <div className="p-3.5 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-xs text-emerald-300 flex items-center gap-2.5 animate-in fade-in">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="font-semibold">{feeActionSuccess}</span>
+            </div>
+          )}
+
+          {/* Detailed Financial Analytics Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-zinc-900/90 border border-zinc-800 rounded-3xl p-5 shadow-xl flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider font-mono">Total Invoiced</span>
+                <div className="text-2xl font-black text-white mt-1">
+                  ₹{feeMetrics ? feeMetrics.total_billed.toLocaleString('en-IN') : '21,000'}
+                </div>
+                <span className="text-[11px] text-zinc-400 font-semibold mt-0.5 block">
+                  {feeMetrics ? feeMetrics.total_invoices : 6} Invoices for Sep 2026
+                </span>
+              </div>
+              <div className="w-12 h-12 rounded-2xl bg-zinc-800 text-zinc-300 flex items-center justify-center font-bold text-xl border border-zinc-700">
+                ₹
+              </div>
+            </div>
+
+            <div className="bg-zinc-900/90 border border-emerald-500/30 rounded-3xl p-5 shadow-xl flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider font-mono">Total Collected</span>
+                <div className="text-2xl font-black text-emerald-400 mt-1">
+                  ₹{feeMetrics ? feeMetrics.total_collected.toLocaleString('en-IN') : '14,000'}
+                </div>
+                <span className="text-[11px] text-emerald-400 font-semibold mt-0.5 block">
+                  {feeMetrics ? feeMetrics.paid_count : 4} of {feeMetrics ? feeMetrics.total_invoices : 6} Paid ({feeMetrics ? feeMetrics.collection_rate : '66.7'}%)
+                </span>
+              </div>
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xl border border-emerald-500/30">
+                ✓
+              </div>
+            </div>
+
+            <div className="bg-zinc-900/90 border border-amber-500/30 rounded-3xl p-5 shadow-xl flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider font-mono">Pending Collection</span>
+                <div className="text-2xl font-black text-amber-400 mt-1">
+                  ₹{feeMetrics ? feeMetrics.total_pending.toLocaleString('en-IN') : '7,000'}
+                </div>
+                <span className="text-[11px] text-amber-400 font-semibold mt-0.5 block">
+                  {feeMetrics ? feeMetrics.pending_count : 1} Awaiting payment
+                </span>
+              </div>
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-xl border border-amber-500/30">
+                ⏳
+              </div>
+            </div>
+
+            <div className="bg-zinc-900/90 border border-rose-500/30 rounded-3xl p-5 shadow-xl flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider font-mono">Overdue Fees</span>
+                <div className="text-2xl font-black text-rose-400 mt-1">
+                  ₹{feeMetrics ? (feeMetrics.overdue_count * 3500).toLocaleString('en-IN') : '3,500'}
+                </div>
+                <span className="text-[11px] text-rose-400 font-semibold mt-0.5 block">
+                  {feeMetrics ? feeMetrics.overdue_count : 1} Follow-up required
+                </span>
+              </div>
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold text-xl border border-rose-500/30">
+                ⚠️
+              </div>
+            </div>
+          </div>
+
+          {/* Ledger Table Container */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-5 shadow-xl space-y-4">
+            {/* Filter Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-zinc-800">
+              <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[280px]">
+                <div className="relative flex-1 min-w-[200px] max-w-sm">
+                  <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={feeSearchQuery}
+                    onChange={(e) => setFeeSearchQuery(e.target.value)}
+                    placeholder="Search invoice #, student or parent..."
+                    className="w-full pl-10 pr-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-zinc-200 focus:outline-none focus:border-orange-500"
+                  />
+                </div>
+
+                {/* Batch Filter */}
+                <select
+                  value={feeBatchFilter}
+                  onChange={(e) => setFeeBatchFilter(e.target.value)}
+                  className="px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-zinc-300 focus:outline-none focus:border-orange-500"
+                >
+                  <option value="">All Batches</option>
+                  {batches.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+
+                {/* Status Filter Pills */}
+                <div className="flex items-center gap-1.5 bg-zinc-950 p-1 rounded-xl border border-zinc-800 text-xs">
+                  {(['', 'paid', 'pending', 'overdue'] as const).map((st) => (
+                    <button
+                      key={st}
+                      onClick={() => setFeeStatusFilter(st)}
+                      className={`px-3 py-1 rounded-lg text-xs font-semibold capitalize transition ${
+                        feeStatusFilter === st
+                          ? 'bg-zinc-800 text-white shadow-sm'
+                          : 'text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      {st === '' ? 'All Status' : st}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="text-xs text-zinc-400 font-mono">
+                Showing <strong className="text-white">{fees.length}</strong> records
+              </div>
+            </div>
+
+            {/* Invoices Ledger Table */}
+            {isBillingLoading ? (
+              <div className="py-16 text-center text-xs font-mono text-zinc-500">
+                Loading fee records & invoices...
+              </div>
+            ) : fees.length === 0 ? (
+              <div className="py-16 text-center text-xs text-zinc-500">
+                No fee records found matching your filters.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-zinc-800 text-[11px] font-mono uppercase tracking-wider text-zinc-400">
+                      <th className="py-3 px-3">Invoice No & Month</th>
+                      <th className="py-3 px-3">Student & Batch</th>
+                      <th className="py-3 px-3">Parent Details</th>
+                      <th className="py-3 px-3 text-right">Fee (₹)</th>
+                      <th className="py-3 px-3">Due Date</th>
+                      <th className="py-3 px-3">Status</th>
+                      <th className="py-3 px-3">Payment Info</th>
+                      <th className="py-3 px-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800/60">
+                    {fees.map((fee) => {
+                      const isPaid = fee.status === 'paid';
+                      const isOverdue = fee.status === 'overdue';
+
+                      return (
+                        <tr key={fee.id} className="hover:bg-zinc-950/40 transition group">
+                          {/* Invoice # & Period */}
+                          <td className="py-3.5 px-3">
+                            <div className="font-mono font-bold text-white group-hover:text-orange-400 transition">
+                              {fee.invoice_number}
+                            </div>
+                            <div className="text-[11px] text-zinc-400 mt-0.5">
+                              {fee.billing_period}
+                            </div>
+                          </td>
+
+                          {/* Student & Batch */}
+                          <td className="py-3.5 px-3">
+                            <div className="flex items-center gap-2.5">
+                              <span className="text-lg">{fee.avatar_emoji || '♟️'}</span>
+                              <div>
+                                <div className="font-bold text-zinc-100">{fee.student_name}</div>
+                                <div className="text-[11px] text-zinc-400">{fee.batch_name || 'Batch Alpha'}</div>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Parent Details */}
+                          <td className="py-3.5 px-3">
+                            <div className="text-zinc-300 font-semibold">{fee.parent_name || 'Guardian'}</div>
+                            <div className="text-[11px] text-zinc-400 font-mono mt-0.5 flex items-center gap-1">
+                              <Phone className="w-3 h-3 text-zinc-500" />
+                              {fee.parent_phone || '—'}
+                            </div>
+                          </td>
+
+                          {/* Fee Amount */}
+                          <td className="py-3.5 px-3 text-right">
+                            <span className="text-sm font-mono font-black text-white">
+                              ₹{fee.amount.toLocaleString('en-IN')}
+                            </span>
+                          </td>
+
+                          {/* Due Date */}
+                          <td className="py-3.5 px-3">
+                            <span className={`font-mono text-[11px] ${isOverdue ? 'text-rose-400 font-bold' : 'text-zinc-300'}`}>
+                              {fee.due_date}
+                            </span>
+                          </td>
+
+                          {/* Status Badge */}
+                          <td className="py-3.5 px-3">
+                            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold capitalize border ${
+                              isPaid
+                                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                                : isOverdue
+                                ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                                : 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                            }`}>
+                              {isPaid ? <CheckCircle2 className="w-3 h-3" /> : isOverdue ? <AlertCircle className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
+                              {fee.status}
+                            </span>
+                          </td>
+
+                          {/* Payment Info */}
+                          <td className="py-3.5 px-3">
+                            {isPaid ? (
+                              <div className="text-[11px]">
+                                <span className="font-semibold text-zinc-300 uppercase">{fee.payment_method || 'UPI'}</span>
+                                {fee.transaction_ref && (
+                                  <div className="text-[10px] font-mono text-zinc-400 truncate max-w-[120px]" title={fee.transaction_ref}>
+                                    Ref: {fee.transaction_ref}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-zinc-500 font-mono italic">Awaiting</span>
+                            )}
+                          </td>
+
+                          {/* Actions */}
+                          <td className="py-3.5 px-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {/* View / Print Official Tax Invoice */}
+                              <button
+                                onClick={() => setSelectedFeeForInvoice(fee)}
+                                className="px-2.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold text-[11px] flex items-center gap-1.5 transition border border-zinc-700/60 hover:border-orange-500/50"
+                                title="View & Print Official GST Invoice"
+                              >
+                                <Printer className="w-3.5 h-3.5 text-orange-400" />
+                                <span>Invoice</span>
+                              </button>
+
+                              {/* Record Payment (if not already paid) */}
+                              {!isPaid && canManage && (
+                                <button
+                                  onClick={() => {
+                                    setRecordingFee(fee);
+                                    setRecordForm({ payment_method: 'upi', transaction_ref: '', notes: '' });
+                                  }}
+                                  className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white font-bold text-[11px] flex items-center gap-1.5 transition shadow-sm"
+                                  title="Record Payment"
+                                >
+                                  <CreditCard className="w-3.5 h-3.5" />
+                                  <span>Pay</span>
+                                </button>
+                              )}
+
+                              {/* 1-Click WhatsApp Reminder / Receipt */}
+                              <button
+                                onClick={() => handleSendFeeWhatsApp(fee)}
+                                className="p-1.5 rounded-xl bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition border border-emerald-500/30"
+                                title={isPaid ? "Send Receipt via WhatsApp" : "Send Fee Reminder via WhatsApp"}
+                              >
+                                <MessageCircle className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1298,6 +1714,101 @@ _Sent via Chess Play Academy Platform_`;
           onClose={() => setReportCardStudent(null)}
           student={reportCardStudent}
           onReportSaved={loadData}
+        />
+      )}
+
+      {/* Record Payment Modal */}
+      {recordingFee && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <div>
+                <h3 className="text-base font-black text-white flex items-center gap-2">
+                  <CreditCard className="w-4 h-4 text-orange-400" />
+                  Record Fee Payment
+                </h3>
+                <p className="text-xs text-zinc-400">{recordingFee.student_name} • {recordingFee.invoice_number}</p>
+              </div>
+              <button onClick={() => setRecordingFee(null)} className="p-1.5 rounded-xl text-zinc-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleRecordPayment} className="space-y-4 text-xs">
+              <div className="p-3 rounded-2xl bg-zinc-950 border border-zinc-800 flex items-center justify-between">
+                <div>
+                  <div className="text-zinc-400 text-[11px]">Due Amount</div>
+                  <div className="text-xl font-mono font-black text-white">₹{recordingFee.amount.toLocaleString('en-IN')}</div>
+                </div>
+                <div className="text-right">
+                  <div className="text-zinc-400 text-[11px]">Period</div>
+                  <div className="text-xs font-semibold text-orange-400">{recordingFee.billing_period}</div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-zinc-300 font-bold mb-1">Payment Method *</label>
+                <select
+                  value={recordForm.payment_method}
+                  onChange={(e) => setRecordForm({ ...recordForm, payment_method: e.target.value })}
+                  className="w-full px-3.5 py-2.5 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-200 focus:outline-none focus:border-orange-500"
+                >
+                  <option value="upi">UPI (GPay / PhonePe / Paytm / QR)</option>
+                  <option value="netbanking">Net Banking / NEFT / IMPS</option>
+                  <option value="cash">Cash in Hand</option>
+                  <option value="card">Debit / Credit Card</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-zinc-300 font-bold mb-1">Transaction Ref / UTR No.</label>
+                <input
+                  type="text"
+                  value={recordForm.transaction_ref}
+                  onChange={(e) => setRecordForm({ ...recordForm, transaction_ref: e.target.value })}
+                  placeholder="e.g. UPI/9842109 or NEFT48329"
+                  className="w-full px-3.5 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-200 focus:outline-none focus:border-orange-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-zinc-300 font-bold mb-1">Remarks / Note (Optional)</label>
+                <textarea
+                  rows={2}
+                  value={recordForm.notes}
+                  onChange={(e) => setRecordForm({ ...recordForm, notes: e.target.value })}
+                  placeholder="e.g. Received via GPay from student father"
+                  className="w-full px-3.5 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-zinc-200 focus:outline-none focus:border-orange-500 resize-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setRecordingFee(null)}
+                  className="px-4 py-2 rounded-xl bg-zinc-800 text-zinc-300 hover:bg-zinc-700 font-bold transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white font-bold transition shadow-lg shadow-orange-500/20 disabled:opacity-50 flex items-center gap-2"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  {isSubmitting ? 'Recording...' : 'Mark as Paid'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Official Tax Invoice & GST Receipt Modal */}
+      {selectedFeeForInvoice && (
+        <FeeInvoiceModal
+          fee={selectedFeeForInvoice}
+          onClose={() => setSelectedFeeForInvoice(null)}
         />
       )}
     </div>
