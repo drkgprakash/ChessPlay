@@ -7,9 +7,10 @@ interface AuthResponse {
 }
 
 interface AuthContextType {
-  user: UserProfile;
+  user: UserProfile | null;
   token: string | null;
   isLoading: boolean;
+  isLoggedIn: boolean;
   login: (email: string, pass: string) => Promise<AuthResponse>;
   quickSwitchRole: (role: UserRole) => Promise<void>;
   logout: () => void;
@@ -19,29 +20,22 @@ interface AuthContextType {
   setLoginModalOpen: (open: boolean) => void;
 }
 
-const DEFAULT_USER: UserProfile = {
-  id: 'usr-owner',
-  name: 'Platform Owner (You)',
-  email: 'owner@chessplay.in',
-  role: 'saas_owner',
-  avatar: '👑',
-  permissions: ['*']
-};
-
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('chessplay_auth_jwt'));
-  const [user, setUser] = useState<UserProfile>(() => {
+  const [user, setUser] = useState<UserProfile | null>(() => {
     const saved = localStorage.getItem('chessplay_auth_user');
-    if (saved) {
+    const savedToken = localStorage.getItem('chessplay_auth_jwt');
+    if (saved && savedToken) {
       try {
         return JSON.parse(saved);
       } catch {
-        // Fallback
+        // Corrupted cache
       }
     }
-    return DEFAULT_USER;
+    // Protected by default: Unauthenticated visitors MUST log in
+    return null;
   });
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isLoginModalOpen, setLoginModalOpen] = useState<boolean>(false);
@@ -51,6 +45,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const restoreSession = async () => {
       const savedToken = localStorage.getItem('chessplay_auth_jwt');
       if (!savedToken) {
+        setUser(null);
         setIsLoading(false);
         return;
       }
@@ -79,14 +74,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             };
             setUser(restoredProfile);
             localStorage.setItem('chessplay_auth_user', JSON.stringify(restoredProfile));
+          } else {
+            // Invalid session payload
+            localStorage.removeItem('chessplay_auth_jwt');
+            localStorage.removeItem('chessplay_auth_user');
+            setUser(null);
+            setToken(null);
           }
         } else {
-          // Token invalid/expired
+          // Token expired or invalid on server
           localStorage.removeItem('chessplay_auth_jwt');
+          localStorage.removeItem('chessplay_auth_user');
+          setUser(null);
           setToken(null);
         }
       } catch (err) {
-        console.warn('Auth check skipped (offline or network error):', err);
+        console.warn('Backend session verification skipped (network or local mode):', err);
       } finally {
         setIsLoading(false);
       }
@@ -113,7 +116,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           role: u.role,
           academyId: u.academy_id,
           academyName: u.academy_name,
-          avatar: u.avatar_emoji || (u.role === 'saas_owner' ? '👑' : '👨‍🏫'),
+          avatar: u.avatar_emoji || (u.role === 'saas_owner' ? '👑' : u.role === 'academy_admin' ? '🏛️' : u.role === 'head_coach' ? '👨‍🏫' : '🧑‍🏫'),
           permissions: u.permissions || ROLE_PERMISSIONS_MAP[u.role as UserRole] || [],
           token: data.token
         };
@@ -134,7 +137,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await quickSwitchRole(match.role);
         return { success: true };
       }
-      return { success: false, error: 'Network connection failed. Please check server.' };
+      return { success: false, error: 'Connection failed. Please check your internet or try again.' };
     }
   }, []);
 
@@ -171,7 +174,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
     } catch {
-      // Fallback to local
+      // Fallback
     }
 
     // Local fallback if API unreachable
@@ -197,29 +200,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem('chessplay_auth_jwt');
     localStorage.removeItem('chessplay_auth_user');
     setToken(null);
-    quickSwitchRole('head_coach');
-  }, [quickSwitchRole]);
+    setUser(null);
+    setLoginModalOpen(false);
+  }, []);
 
   const hasPermission = useCallback((permission: string): boolean => {
+    if (!user) return false;
     if (user.role === 'saas_owner') return true;
     if (user.permissions.includes('*')) return true;
     return user.permissions.includes(permission);
   }, [user]);
 
   const canAccessTab = useCallback((tabId: string): boolean => {
+    if (!user) return false;
     switch (tabId) {
-      case 'saas-owner':
+      case 'owner_overview':
         return user.role === 'saas_owner';
-      case 'coaches':
+      case 'faculty':
         return user.role === 'saas_owner' || user.role === 'academy_admin';
       case 'classroom':
         return hasPermission('classroom:view') || hasPermission('classroom:master') || hasPermission('classroom:assist');
       case 'tournaments':
         return hasPermission('tournaments:manage') || hasPermission('tournaments:play') || hasPermission('tournaments:view');
-      case 'lms':
+      case 'academy':
         return hasPermission('homework:create') || hasPermission('homework:grade') || hasPermission('homework:submit');
-      case 'settings':
-        return user.role === 'saas_owner' || user.role === 'academy_admin';
       default:
         return true;
     }
@@ -231,6 +235,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         token,
         isLoading,
+        isLoggedIn: Boolean(user && token),
         login,
         quickSwitchRole,
         logout,

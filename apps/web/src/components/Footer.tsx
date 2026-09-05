@@ -26,7 +26,7 @@ export const Footer: React.FC<FooterProps> = ({ setCurrentPage }) => {
             </p>
             <div className="flex items-center gap-2 text-[11px] text-zinc-500">
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>Hostinger High-Performance Enterprise Infrastructure</span>
+              <span>High-Availability Cloud Infrastructure • 99.99% Uptime</span>
             </div>
           </div>
 

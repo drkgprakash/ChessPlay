@@ -45,7 +45,7 @@ export const LoginModal: React.FC = () => {
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
                 Secured Auth & Role-Based Access Control (RBAC)
               </h2>
-              <p className="text-xs text-zinc-400">Powered by Hostinger MySQL + HMAC-SHA256 Cryptographic JWT</p>
+              <p className="text-xs text-zinc-400">256-Bit Token Authentication & Role-Based Permissions</p>
             </div>
           </div>
           <button
@@ -83,28 +83,30 @@ export const LoginModal: React.FC = () => {
         {/* Modal Body */}
         <div className="p-6 overflow-y-auto space-y-6">
           {/* Active Session Status */}
-          <div className="p-3.5 rounded-2xl bg-zinc-950 border border-zinc-800 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-2xl">{user.avatar}</span>
-              <div>
-                <div className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider flex items-center gap-2">
-                  <span>Current Active Session</span>
-                  {token && (
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 font-mono">
-                      JWT Verified ✓
+          {user && (
+            <div className="p-3.5 rounded-2xl bg-zinc-950 border border-zinc-800 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">{user.avatar}</span>
+                <div>
+                  <div className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider flex items-center gap-2">
+                    <span>Current Active Session</span>
+                    {token && (
+                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 font-mono">
+                        JWT Verified ✓
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-sm font-bold text-white flex items-center gap-2">
+                    {user.name}
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 font-mono font-bold">
+                      {user.role.toUpperCase().replace('_', ' ')}
                     </span>
-                  )}
-                </div>
-                <div className="text-sm font-bold text-white flex items-center gap-2">
-                  {user.name}
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400 font-mono font-bold">
-                    {user.role.toUpperCase().replace('_', ' ')}
-                  </span>
+                  </div>
                 </div>
               </div>
+              <span className="text-xs text-zinc-400 font-mono">{user.email}</span>
             </div>
-            <span className="text-xs text-zinc-400 font-mono">{user.email}</span>
-          </div>
+          )}
 
           {error && (
             <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-center gap-2">
@@ -126,7 +128,7 @@ export const LoginModal: React.FC = () => {
                     key={cred.role}
                     onClick={() => handleSelectDemo(cred.role)}
                     className={`p-4 rounded-2xl border text-left cursor-pointer transition flex flex-col justify-between ${
-                      user.role === cred.role
+                      user?.role === cred.role
                         ? 'bg-orange-500/10 border-orange-500 shadow-md ring-1 ring-orange-500/30'
                         : 'bg-zinc-950/60 border-zinc-800 hover:border-zinc-700 hover:bg-zinc-950'
                     }`}
@@ -165,7 +167,7 @@ export const LoginModal: React.FC = () => {
                         disabled={isSubmitting}
                         className="text-[11px] font-bold text-orange-400 hover:underline flex items-center gap-1"
                       >
-                        {user.role === cred.role ? 'Active ✓' : isSubmitting ? 'Signing...' : 'Sign In →'}
+                        {user?.role === cred.role ? 'Active ✓' : isSubmitting ? 'Signing...' : 'Sign In →'}
                       </button>
                     </div>
                   </div>
@@ -176,7 +178,7 @@ export const LoginModal: React.FC = () => {
             /* Manual Email & Password Form */
             <form onSubmit={handleManualLogin} className="space-y-4 bg-zinc-950/60 p-5 rounded-2xl border border-zinc-800">
               <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-2">
-                <Lock className="w-3.5 h-3.5 text-orange-400" /> Hostinger MySQL Authentication
+                <Lock className="w-3.5 h-3.5 text-orange-400" /> Secure Account Authentication
               </h3>
 
               <div>
@@ -226,10 +228,10 @@ export const LoginModal: React.FC = () => {
           {/* Permissions Matrix Comparison */}
           <div className="border border-zinc-800 rounded-2xl p-4 bg-zinc-950/50">
             <h4 className="text-xs font-bold text-zinc-200 mb-3 flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" /> Active Permissions for {user.name}
+              <ShieldCheck className="w-4 h-4 text-emerald-400" /> Active Permissions for {user?.name || 'Guest'}
             </h4>
             <div className="flex flex-wrap gap-1.5">
-              {user.permissions.map((p) => (
+              {(user?.permissions || []).map((p) => (
                 <span key={p} className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-zinc-800 text-zinc-300 border border-zinc-700">
                   {p === '*' ? '👑 Full Platform Superadmin (*)' : p}
                 </span>
@@ -240,8 +242,8 @@ export const LoginModal: React.FC = () => {
 
         {/* Footer */}
         <div className="px-6 py-4 bg-zinc-950 border-t border-zinc-800 flex items-center justify-between">
-          <span className="text-[11px] text-zinc-500 font-mono">
-            Hostinger DB: u586022648_chessplay
+          <span className="text-[11px] text-zinc-500 font-mono flex items-center gap-1.5">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> 256-Bit SSL Encrypted Session
           </span>
           <button
             onClick={() => setLoginModalOpen(false)}

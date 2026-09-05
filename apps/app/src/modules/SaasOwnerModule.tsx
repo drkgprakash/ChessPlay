@@ -28,18 +28,18 @@ export const SaasOwnerModule: React.FC = () => {
   );
 
   return (
-    <div className="flex flex-col gap-6 max-w-7xl mx-auto font-sans">
+    <div className="flex flex-col gap-6 font-sans">
       {/* SaaS Owner Header Banner */}
-      <div className="bg-gradient-to-r from-purple-950/60 via-zinc-900 to-zinc-900 border border-purple-500/30 rounded-3xl p-6 shadow-xl flex flex-wrap items-center justify-between gap-4">
+      <div className="bg-gradient-to-r from-purple-950/40 via-zinc-900 to-zinc-900 border border-purple-500/20 rounded-3xl p-6 shadow-xl flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-4">
-          <div className="w-14 h-14 rounded-2xl bg-purple-500/20 text-purple-400 border border-purple-500/30 flex items-center justify-center text-3xl shadow-inner">
+          <div className="w-14 h-14 rounded-2xl bg-purple-500/15 text-purple-400 border border-purple-500/30 flex items-center justify-center text-3xl shadow-inner">
             👑
           </div>
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-bold text-white">SaaS Platform Command Center</h2>
               <span className="text-xs px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-bold border border-purple-500/30">
-                Superadmin (You)
+                Superadmin
               </span>
             </div>
             <p className="text-xs text-zinc-400 mt-1">
@@ -49,16 +49,16 @@ export const SaasOwnerModule: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 text-xs">
-          <span className="px-3 py-1.5 rounded-xl bg-zinc-950 border border-zinc-800 text-zinc-300 font-mono flex items-center gap-2">
+          <span className="px-3.5 py-1.5 rounded-xl bg-zinc-950 border border-zinc-800 text-zinc-300 font-mono flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            Hostinger LiteSpeed: 99.99% Uptime
+            Edge Network: 99.99% Operational
           </span>
         </div>
       </div>
 
       {/* Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 shadow-lg">
+        <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-5 shadow-lg">
           <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Total Academies</span>
           <div className="text-3xl font-extrabold text-white mt-1">152</div>
           <span className="text-xs text-emerald-400 font-semibold mt-1 flex items-center gap-1">
@@ -66,7 +66,7 @@ export const SaasOwnerModule: React.FC = () => {
           </span>
         </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 shadow-lg">
+        <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-5 shadow-lg">
           <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Active Students</span>
           <div className="text-3xl font-extrabold text-white mt-1">12,480</div>
           <span className="text-xs text-emerald-400 font-semibold mt-1 flex items-center gap-1">
@@ -74,7 +74,7 @@ export const SaasOwnerModule: React.FC = () => {
           </span>
         </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 shadow-lg">
+        <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-5 shadow-lg">
           <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Monthly Revenue (MRR)</span>
           <div className="text-3xl font-extrabold text-purple-300 mt-1">₹11,85,000</div>
           <span className="text-xs text-zinc-400 mt-1 block font-mono">
@@ -82,11 +82,14 @@ export const SaasOwnerModule: React.FC = () => {
           </span>
         </div>
 
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 shadow-lg">
-          <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Database Status</span>
-          <div className="text-base font-bold text-white mt-1 font-mono">u586022648_chessplay</div>
-          <span className="text-xs text-emerald-400 font-semibold mt-1 flex items-center gap-1">
-            <Database className="w-3 h-3" /> Hostinger MySQL Connected
+        <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-5 shadow-lg">
+          <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Cloud Engine Status</span>
+          <div className="text-2xl font-extrabold text-emerald-400 mt-1 flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+            Healthy
+          </div>
+          <span className="text-xs text-zinc-400 font-medium mt-1 flex items-center gap-1.5">
+            <Database className="w-3.5 h-3.5 text-emerald-400" /> Encrypted Multi-Region Sync
           </span>
         </div>
       </div>
