@@ -43,7 +43,7 @@ export interface ClassroomSyncEvent {
   user_id: string;
   user_name: string;
   user_role: string;
-  event_type: 'move' | 'fen_reset' | 'arrow_draw' | 'board_lock' | 'student_move' | 'raise_hand' | 'chat_message' | 'simul_reset';
+  event_type: 'move' | 'fen_reset' | 'arrow_draw' | 'board_lock' | 'student_move' | 'raise_hand' | 'chat_message' | 'simul_reset' | 'webrtc_signal' | 'stream_status';
   payload: any;
   created_at: string;
 }
@@ -279,5 +279,61 @@ export const classroomService = {
       //
     }
     return null;
+  },
+
+  /**
+   * Send WebRTC signal payload
+   */
+  async sendSignal(batchId: string, signal: any, token: string): Promise<boolean> {
+    try {
+      const res = await fetch(`${API_BASE}?action=signal`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          batch_id: batchId,
+          target_user_id: signal.target_user_id,
+          signal_type: signal.signal_type,
+          signal_data: signal.signal_data
+        })
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  },
+
+  /**
+   * Broadcast Stream Status
+   */
+  async broadcastStreamStatus(
+    batchId: string,
+    camActive: boolean,
+    micActive: boolean,
+    screenActive: boolean,
+    streamType: string,
+    token: string
+  ): Promise<boolean> {
+    try {
+      const res = await fetch(`${API_BASE}?action=stream_status`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          batch_id: batchId,
+          cam_active: camActive ? 1 : 0,
+          mic_active: micActive ? 1 : 0,
+          screen_active: screenActive ? 1 : 0,
+          stream_type: streamType
+        })
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
   }
 };

@@ -61,7 +61,7 @@ function ensureSimulBoards($pdo, $sessionId) {
     if ($count < 6) {
         $defaultBoards = [
             ['sb-1', $sessionId, 'st-1', 'Aarav Sharma', '👦', 'r1bqkb1r/pppp1ppp/2n5/4p3/2B1n3/5Q2/PPPP1PPP/RNB1K1NR w KQkq - 0 5', 'Qf3', '+1.4', 'active', 0],
-            ['sb-2', $sessionId, 'st-2', 'Diya Patel', '👧', '6k1/5ppp/8/8/8/5Q2/4NPPP/2r3K1 w - - 0 1', 'cxd4', '-0.8', 'blunder', 1],
+            ['sb-2', $sessionId, 'st-2', 'Diya Patel', '👧', '6k1/5ppp/8/8/8/5Q2/4NPPP/2r3K1 w - - 0 1', 'cxd4', '-0.8', 'blunder', 0],
             ['sb-3', $sessionId, 'st-3', 'Rohan Iyer', '🧑', 'r3k2r/pppq1ppp/3p1n2/4p3/1b2P3/2NP1N2/PPP2PPP/R1BQK2R w KQkq - 0 8', 'Nf6', '+2.1', 'active', 0],
             ['sb-4', $sessionId, 'st-4', 'Ananya Gupta', '👧', 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1', 'e4', '0.0', 'waiting', 0],
             ['sb-5', $sessionId, 'st-5', 'Kabir Verma', '👦', 'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2', 'Nf3', '+3.6', 'active', 0],
@@ -485,8 +485,86 @@ if ($action === 'broadcast_to_simul' && $method === 'POST') {
     exit;
 }
 
+// ---------------------------------------------------------
+// 8. POST ?action=signal
+// WebRTC Signaling: exchange offer, answer, and ICE candidates
+// ---------------------------------------------------------
+if ($action === 'signal' && $method === 'POST') {
+    $input = getJsonInput();
+    $batchId = trim($input['batch_id'] ?? 'batch-01');
+    $targetUserId = trim($input['target_user_id'] ?? '');
+    $signalType = trim($input['signal_type'] ?? '');
+    $signalData = $input['signal_data'] ?? null;
+
+    $sessionStmt = $pdo->prepare("SELECT id FROM classroom_sessions WHERE batch_id = :batch_id AND status = 'active' LIMIT 1");
+    $sessionStmt->execute(['batch_id' => $batchId]);
+    $session = $sessionStmt->fetch();
+    $sessionId = $session['id'] ?? 'session-01';
+
+    $insStmt = $pdo->prepare("INSERT INTO classroom_events (session_id, batch_id, user_id, user_name, user_role, event_type, payload) 
+                             VALUES (:session_id, :batch_id, :user_id, :user_name, :user_role, 'webrtc_signal', :payload)");
+    $insStmt->execute([
+        'session_id' => $sessionId,
+        'batch_id' => $batchId,
+        'user_id' => $user['id'],
+        'user_name' => $user['name'],
+        'user_role' => $user['role'],
+        'payload' => json_encode([
+            'target_user_id' => $targetUserId,
+            'from_user_id' => $user['id'],
+            'from_user_name' => $user['name'],
+            'from_user_role' => $user['role'],
+            'signal_type' => $signalType,
+            'signal_data' => $signalData
+        ])
+    ]);
+
+    echo json_encode(['status' => 'success', 'signal_id' => (int)$pdo->lastInsertId()]);
+    exit;
+}
+
+// ---------------------------------------------------------
+// 9. POST ?action=stream_status
+// Broadcasts AV status (cam_active, mic_active, screen_active)
+// ---------------------------------------------------------
+if ($action === 'stream_status' && $method === 'POST') {
+    $input = getJsonInput();
+    $batchId = trim($input['batch_id'] ?? 'batch-01');
+    $camActive = !empty($input['cam_active']) ? 1 : 0;
+    $micActive = !empty($input['mic_active']) ? 1 : 0;
+    $screenActive = !empty($input['screen_active']) ? 1 : 0;
+    $streamType = trim($input['stream_type'] ?? 'webcam');
+
+    $sessionStmt = $pdo->prepare("SELECT id FROM classroom_sessions WHERE batch_id = :batch_id AND status = 'active' LIMIT 1");
+    $sessionStmt->execute(['batch_id' => $batchId]);
+    $session = $sessionStmt->fetch();
+    $sessionId = $session['id'] ?? 'session-01';
+
+    $insStmt = $pdo->prepare("INSERT INTO classroom_events (session_id, batch_id, user_id, user_name, user_role, event_type, payload) 
+                             VALUES (:session_id, :batch_id, :user_id, :user_name, :user_role, 'stream_status', :payload)");
+    $insStmt->execute([
+        'session_id' => $sessionId,
+        'batch_id' => $batchId,
+        'user_id' => $user['id'],
+        'user_name' => $user['name'],
+        'user_role' => $user['role'],
+        'payload' => json_encode([
+            'user_id' => $user['id'],
+            'user_name' => $user['name'],
+            'role' => $user['role'],
+            'cam_active' => $camActive,
+            'mic_active' => $micActive,
+            'screen_active' => $screenActive,
+            'stream_type' => $streamType
+        ])
+    ]);
+
+    echo json_encode(['status' => 'success']);
+    exit;
+}
+
 echo json_encode([
     'status' => 'ok',
     'service' => 'Chess Play Realtime Classroom API',
-    'actions' => ['snapshot', 'sync', 'broadcast', 'student_move', 'raise_hand', 'chat', 'broadcast_to_simul']
+    'actions' => ['snapshot', 'sync', 'broadcast', 'student_move', 'raise_hand', 'chat', 'broadcast_to_simul', 'signal', 'stream_status']
 ]);

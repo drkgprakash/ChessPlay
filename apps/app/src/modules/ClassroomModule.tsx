@@ -18,6 +18,7 @@ import {
   StudentBoardState, 
   ClassroomChatMessage 
 } from '../services/classroomService';
+import { webrtcService, WebRTCSignalPayload } from '../services/webrtcService';
 import { MASTER_GAMES, MasterGame } from '../data/masterGames';
 import { generateFidePgn, downloadPgnFile, copyToClipboard } from '../utils/pgnExporter';
 
@@ -140,7 +141,84 @@ export const ClassroomModule: React.FC = () => {
   const [isScreenSharing, setIsScreenSharing] = useState<boolean>(false);
   const [audioWave, setAudioWave] = useState<number[]>([35, 65, 90, 55, 75]);
 
-  // Callback ref to guarantee immediate stream binding when video element mounts
+  // WebRTC Peer-to-Peer AV Streams & Audio Playback
+  const [coachRemoteStream, setCoachRemoteStream] = useState<MediaStream | null>(null);
+  const [studentRemoteStreams, setStudentRemoteStreams] = useState<Record<string, MediaStream>>({});
+  const [remoteAudioMuted, setRemoteAudioMuted] = useState<boolean>(false);
+  const [remoteAudioBlocked, setRemoteAudioBlocked] = useState<boolean>(false);
+  const [coachStreamStatus, setCoachStreamStatus] = useState<{
+    cam_active: boolean;
+    mic_active: boolean;
+    screen_active: boolean;
+    stream_type: string;
+  }>({
+    cam_active: false,
+    mic_active: true,
+    screen_active: false,
+    stream_type: 'webcam'
+  });
+  const [studentStreamStatuses, setStudentStreamStatuses] = useState<Record<string, { cam_active: boolean; mic_active: boolean }>>({});
+
+  // Video element refs
+  const remoteCoachVideoRef = useRef<HTMLVideoElement | null>(null);
+  const studentVideoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
+
+  // Callback ref for Coach remote stream (rendered on student screen)
+  const setRemoteCoachVideoRef = (element: HTMLVideoElement | null) => {
+    remoteCoachVideoRef.current = element;
+    if (element && coachRemoteStream) {
+      if (element.srcObject !== coachRemoteStream) {
+        element.srcObject = coachRemoteStream;
+      }
+      element.play().catch(err => {
+        console.warn('Coach remote video playback blocked by browser:', err);
+        if (err.name === 'NotAllowedError') {
+          setRemoteAudioBlocked(true);
+        }
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (remoteCoachVideoRef.current && coachRemoteStream) {
+      if (remoteCoachVideoRef.current.srcObject !== coachRemoteStream) {
+        remoteCoachVideoRef.current.srcObject = coachRemoteStream;
+      }
+      remoteCoachVideoRef.current.play().catch(err => {
+        console.warn('Coach video play error:', err);
+        if (err.name === 'NotAllowedError') {
+          setRemoteAudioBlocked(true);
+        }
+      });
+    }
+  }, [coachRemoteStream]);
+
+  // Callback ref for student video elements in strip (rendered on coach screen)
+  const setStudentVideoRef = (studentId: string, element: HTMLVideoElement | null) => {
+    studentVideoRefs.current[studentId] = element;
+    const stream = studentRemoteStreams[studentId];
+    if (element && stream) {
+      if (element.srcObject !== stream) {
+        element.srcObject = stream;
+      }
+      element.play().catch(err => console.warn(`Student ${studentId} video playback:`, err));
+    }
+  };
+
+  // Sync student streams whenever studentRemoteStreams updates
+  useEffect(() => {
+    Object.entries(studentRemoteStreams).forEach(([sid, stream]) => {
+      const el = studentVideoRefs.current[sid];
+      if (el && stream) {
+        if (el.srcObject !== stream) {
+          el.srcObject = stream;
+        }
+        el.play().catch(err => console.warn(`Student ${sid} stream play:`, err));
+      }
+    });
+  }, [studentRemoteStreams]);
+
+  // Callback ref to guarantee immediate stream binding when local video mounts
   const setVideoRef = (element: HTMLVideoElement | null) => {
     videoRef.current = element;
     if (element && localStreamRef.current) {
@@ -148,7 +226,7 @@ export const ClassroomModule: React.FC = () => {
         element.srcObject = localStreamRef.current;
       }
       element.play().catch(err => {
-        console.warn('Video auto-playback deferred:', err);
+        console.warn('Local video auto-playback deferred:', err);
       });
     }
   };
@@ -259,6 +337,43 @@ export const ClassroomModule: React.FC = () => {
     };
   }, [batchId, token, isCoach, user?.id]);
 
+  // WebRTC Initialization & P2P Stream Lifecycle
+  useEffect(() => {
+    if (!token || !user) return;
+
+    const currentUid = isCoach ? (user.id || 'coach-01') : (myStudentId || user.id || 'st-1');
+    const currentName = user.name || (isCoach ? 'GM Vikram Sen' : 'Student');
+    const currentRole = user.role || (isCoach ? 'head_coach' : 'student');
+
+    webrtcService.init(
+      String(currentUid),
+      currentName,
+      currentRole,
+      async (signal: WebRTCSignalPayload) => {
+        return classroomService.sendSignal(batchId, signal, token);
+      },
+      (peerUserId: string, stream: MediaStream, peerRole?: string) => {
+        const isPeerCoach = peerRole === 'head_coach' || peerRole === 'saas_owner' || peerRole === 'academy_admin' || peerUserId.includes('coach');
+        if (isPeerCoach) {
+          setCoachRemoteStream(stream);
+          setCoachStreamStatus(prev => ({ ...prev, cam_active: true }));
+        } else {
+          setStudentRemoteStreams(prev => ({
+            ...prev,
+            [peerUserId]: stream
+          }));
+        }
+      }
+    );
+
+    // Announce presence / stream status to peers
+    webrtcService.announceStreamReady('webcam');
+
+    return () => {
+      webrtcService.cleanup();
+    };
+  }, [token, user, isCoach, myStudentId, batchId]);
+
   // Delta Polling Loop (sub-second real-time sync)
   useEffect(() => {
     if (!token) return;
@@ -290,7 +405,27 @@ export const ClassroomModule: React.FC = () => {
         // Process incoming delta events
         if (delta.events && delta.events.length > 0) {
           for (const ev of delta.events) {
-            if (ev.event_type === 'move' && ev.payload?.fen) {
+            if (ev.event_type === 'webrtc_signal' && ev.payload) {
+              webrtcService.handleIncomingSignal(ev.payload);
+            } else if (ev.event_type === 'stream_status' && ev.payload) {
+              const isPeerCoach = ev.user_role === 'head_coach' || ev.user_role === 'saas_owner' || ev.user_role === 'academy_admin' || String(ev.user_id).includes('coach');
+              if (isPeerCoach) {
+                setCoachStreamStatus({
+                  cam_active: Boolean(ev.payload.cam_active),
+                  mic_active: Boolean(ev.payload.mic_active),
+                  screen_active: Boolean(ev.payload.screen_active),
+                  stream_type: ev.payload.stream_type || 'webcam'
+                });
+              } else {
+                setStudentStreamStatuses(prev => ({
+                  ...prev,
+                  [String(ev.user_id)]: {
+                    cam_active: Boolean(ev.payload.cam_active),
+                    mic_active: Boolean(ev.payload.mic_active)
+                  }
+                }));
+              }
+            } else if (ev.event_type === 'move' && ev.payload?.fen) {
               if (ev.payload.fen !== chess.fen()) {
                 try {
                   chess.load(ev.payload.fen);
@@ -563,6 +698,27 @@ export const ClassroomModule: React.FC = () => {
     };
   }, []);
 
+  // Toggle Mic
+  const handleToggleMic = () => {
+    const nextMic = !micOn;
+    setMicOn(nextMic);
+    if (localStreamRef.current) {
+      localStreamRef.current.getAudioTracks().forEach(track => {
+        track.enabled = nextMic;
+      });
+    }
+    if (token) {
+      classroomService.broadcastStreamStatus(
+        batchId, 
+        isCamStreaming, 
+        nextMic, 
+        isScreenSharing, 
+        isScreenSharing ? 'screen' : 'webcam', 
+        token
+      );
+    }
+  };
+
   // Toggle Camera Stream
   const handleToggleCam = async () => {
     if (isCamStreaming) {
@@ -575,6 +731,10 @@ export const ClassroomModule: React.FC = () => {
       }
       setIsCamStreaming(false);
       setCamOn(false);
+      webrtcService.setLocalStream(null);
+      if (token) {
+        classroomService.broadcastStreamStatus(batchId, false, micOn, false, 'webcam', token);
+      }
     } else {
       setCamOn(true);
       try {
@@ -596,10 +756,28 @@ export const ClassroomModule: React.FC = () => {
           videoRef.current.play().catch(err => console.warn('Camera play:', err));
         }
 
+        webrtcService.setLocalStream(stream);
+        webrtcService.announceStreamReady('webcam');
+
+        if (token) {
+          classroomService.broadcastStreamStatus(batchId, true, micOn, false, 'webcam', token);
+        }
+
+        // If coach, proactively call connected students
+        if (isCoach) {
+          studentBoards.forEach(sb => {
+            webrtcService.callPeer(sb.student_id, 'student');
+          });
+        }
+
         stream.getVideoTracks().forEach(track => {
           track.onended = () => {
             setIsCamStreaming(false);
             if (videoRef.current) videoRef.current.srcObject = null;
+            webrtcService.setLocalStream(null);
+            if (token) {
+              classroomService.broadcastStreamStatus(batchId, false, micOn, false, 'webcam', token);
+            }
           };
         });
       } catch (err: any) {
@@ -621,6 +799,10 @@ export const ClassroomModule: React.FC = () => {
         videoRef.current.srcObject = null;
       }
       setIsScreenSharing(false);
+      webrtcService.setLocalStream(null);
+      if (token) {
+        classroomService.broadcastStreamStatus(batchId, false, micOn, false, 'screen', token);
+      }
     } else {
       try {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
@@ -628,7 +810,7 @@ export const ClassroomModule: React.FC = () => {
           return;
         }
 
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: micOn });
         localStreamRef.current = stream;
         setIsScreenSharing(true);
 
@@ -637,9 +819,26 @@ export const ClassroomModule: React.FC = () => {
           videoRef.current.play().catch(err => console.warn('Screen share play:', err));
         }
 
+        webrtcService.setLocalStream(stream);
+        webrtcService.announceStreamReady('screen');
+
+        if (token) {
+          classroomService.broadcastStreamStatus(batchId, true, micOn, true, 'screen', token);
+        }
+
+        if (isCoach) {
+          studentBoards.forEach(sb => {
+            webrtcService.callPeer(sb.student_id, 'student');
+          });
+        }
+
         stream.getVideoTracks()[0].onended = () => {
           setIsScreenSharing(false);
           if (videoRef.current) videoRef.current.srcObject = null;
+          webrtcService.setLocalStream(null);
+          if (token) {
+            classroomService.broadcastStreamStatus(batchId, false, micOn, false, 'screen', token);
+          }
         };
       } catch (err: any) {
         console.warn('Screen share error:', err);
@@ -954,7 +1153,7 @@ export const ClassroomModule: React.FC = () => {
           {/* AV Controls */}
           <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-xl border border-zinc-800">
             <button
-              onClick={() => setMicOn(prev => !prev)}
+              onClick={handleToggleMic}
               className={`p-2 rounded-lg text-xs transition ${
                 micOn ? 'text-zinc-300 hover:text-white hover:bg-zinc-800' : 'bg-rose-500/20 text-rose-300'
               }`}
@@ -1105,87 +1304,205 @@ export const ClassroomModule: React.FC = () => {
             {/* AV Stream Stage Card */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-xl flex flex-col">
               <div className="relative aspect-video bg-zinc-950 flex items-center justify-center overflow-hidden">
-                {/* Always-mounted video element ensuring ref and stream binding are instant */}
-                <video
-                  ref={setVideoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  onLoadedMetadata={() => videoRef.current?.play().catch(e => console.warn(e))}
-                  onCanPlay={() => videoRef.current?.play().catch(e => console.warn(e))}
-                  className={`w-full h-full object-cover transition-opacity duration-300 ${
-                    isCamStreaming || isScreenSharing ? 'opacity-100 block' : 'opacity-0 hidden pointer-events-none'
-                  }`}
-                />
+                {isCoach ? (
+                  /* ================= COACH VIEW: Show Coach's Broadcast Stream ================= */
+                  <>
+                    <video
+                      ref={setVideoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className={`w-full h-full object-cover transition-opacity duration-300 ${
+                        isCamStreaming || isScreenSharing ? 'opacity-100 block' : 'opacity-0 hidden pointer-events-none'
+                      }`}
+                    />
 
-                {/* Studio Presenter Card when stream is idle */}
-                {!(isCamStreaming || isScreenSharing) && (
-                  <div className="flex flex-col items-center justify-center p-6 text-center w-full h-full animate-in fade-in">
-                    {camOn ? (
-                      <div className="flex flex-col items-center gap-2.5">
-                        <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-orange-500 to-amber-600 flex items-center justify-center text-white font-black text-2xl shadow-lg shadow-orange-500/30">
-                          ♟️
-                        </div>
-                        <div>
-                          <div className="text-sm font-bold text-white">GM Vikram Sen</div>
-                          <div className="text-xs text-orange-400 font-medium">Head Coach Masterclass</div>
-                        </div>
+                    {/* Studio Presenter Card when Coach stream is idle */}
+                    {!(isCamStreaming || isScreenSharing) && (
+                      <div className="flex flex-col items-center justify-center p-6 text-center w-full h-full animate-in fade-in">
+                        {camOn ? (
+                          <div className="flex flex-col items-center gap-2.5">
+                            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-orange-500 to-amber-600 flex items-center justify-center text-white font-black text-2xl shadow-lg shadow-orange-500/30">
+                              ♟️
+                            </div>
+                            <div>
+                              <div className="text-sm font-bold text-white">GM Vikram Sen (You)</div>
+                              <div className="text-xs text-orange-400 font-medium">Head Coach Masterclass Stage</div>
+                            </div>
 
-                        {/* Live Audio Waveform */}
-                        {micOn ? (
-                          <div className="flex items-center gap-1 h-5 mt-1">
-                            {audioWave.map((h, i) => (
-                              <div
-                                key={i}
-                                className="w-1 bg-emerald-400 rounded-full transition-all duration-150"
-                                style={{ height: `${h}px` }}
-                              />
-                            ))}
-                            <span className="text-[9px] font-mono text-emerald-400 font-bold ml-1">AUDIO READY</span>
+                            {/* Live Audio Waveform */}
+                            {micOn ? (
+                              <div className="flex items-center gap-1 h-5 mt-1">
+                                {audioWave.map((h, i) => (
+                                  <div
+                                    key={i}
+                                    className="w-1 bg-emerald-400 rounded-full transition-all duration-150"
+                                    style={{ height: `${h}px` }}
+                                  />
+                                ))}
+                                <span className="text-[9px] font-mono text-emerald-400 font-bold ml-1">MIC LIVE • BROADCASTING</span>
+                              </div>
+                            ) : (
+                              <span className="text-[9px] font-mono text-zinc-500 font-medium mt-1 flex items-center gap-1">
+                                <VolumeX className="w-3 h-3 text-zinc-500" /> Mic Muted
+                              </span>
+                            )}
+
+                            <button
+                              onClick={handleToggleCam}
+                              className="mt-2 px-3.5 py-1.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-orange-500/20 transition"
+                            >
+                              <Video className="w-3.5 h-3.5" /> Start Broadcast Camera
+                            </button>
                           </div>
                         ) : (
-                          <span className="text-[9px] font-mono text-zinc-500 font-medium mt-1 flex items-center gap-1">
-                            <VolumeX className="w-3 h-3 text-zinc-500" /> Mic Muted
+                          <div className="text-xs text-zinc-500 flex flex-col items-center gap-2">
+                            <div className="w-12 h-12 rounded-xl bg-zinc-800 flex items-center justify-center text-zinc-500">
+                              <VideoOff className="w-5 h-5" />
+                            </div>
+                            <span>Broadcast Camera Paused</span>
+                            <button
+                              onClick={handleToggleCam}
+                              className="mt-1 px-3 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold transition"
+                            >
+                              Resume Camera
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Overlays / Stream Badges for Coach */}
+                    <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 z-20">
+                      <div className="px-2.5 py-0.5 rounded-full bg-black/70 backdrop-blur-md text-[10px] font-mono font-semibold text-emerald-400 flex items-center gap-1.5 border border-white/10">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        {isScreenSharing ? 'SCREEN CASTING TO ALL' : isCamStreaming ? 'LIVE WEBCAM • BROADCASTING' : 'COACH STUDIO STAGE'}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  /* ================= STUDENT VIEW: Show Master GM Vikram Sen's Stream ================= */
+                  <>
+                    <video
+                      ref={setRemoteCoachVideoRef}
+                      autoPlay
+                      playsInline
+                      muted={remoteAudioMuted}
+                      className={`w-full h-full object-cover transition-opacity duration-300 ${
+                        coachRemoteStream ? 'opacity-100 block' : 'opacity-0 hidden pointer-events-none'
+                      }`}
+                    />
+
+                    {/* Autoplay blocked banner (requires 1 user interaction to enable sound) */}
+                    {remoteAudioBlocked && (
+                      <div
+                        onClick={() => {
+                          if (remoteCoachVideoRef.current) {
+                            remoteCoachVideoRef.current.muted = false;
+                            remoteCoachVideoRef.current.play().then(() => {
+                              setRemoteAudioBlocked(false);
+                              setRemoteAudioMuted(false);
+                            }).catch(err => console.warn(err));
+                          }
+                        }}
+                        className="absolute inset-0 bg-black/70 backdrop-blur-sm flex flex-col items-center justify-center p-4 text-center cursor-pointer z-30 animate-fadeIn"
+                      >
+                        <div className="w-12 h-12 rounded-full bg-emerald-500 text-black flex items-center justify-center text-xl font-black mb-2 animate-bounce shadow-xl">
+                          🔊
+                        </div>
+                        <div className="text-white font-bold text-sm">Click to Enable Live Coach Audio</div>
+                        <div className="text-zinc-300 text-xs mt-0.5 max-w-xs">
+                          Browser requires one tap to hear GM Vikram Sen speaking in real time
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Coach Card when Coach is NOT streaming video */}
+                    {!coachRemoteStream && (
+                      <div className="flex flex-col items-center justify-center p-6 text-center w-full h-full animate-in fade-in">
+                        <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-orange-500 to-amber-600 flex items-center justify-center text-white font-black text-2xl shadow-lg shadow-orange-500/30 mb-2">
+                          ♟️
+                        </div>
+                        <div className="text-sm font-bold text-white">GM Vikram Sen</div>
+                        <div className="text-xs text-orange-400 font-medium">Head Coach • Masterclass Stream</div>
+
+                        {coachStreamStatus.mic_active ? (
+                          <div className="flex items-center gap-1.5 h-5 mt-2">
+                            <div className="flex items-center gap-0.5">
+                              {audioWave.map((h, i) => (
+                                <div
+                                  key={i}
+                                  className="w-1 bg-emerald-400 rounded-full transition-all duration-150"
+                                  style={{ height: `${Math.max(6, h * 0.4)}px` }}
+                                />
+                              ))}
+                            </div>
+                            <span className="text-[10px] font-mono text-emerald-400 font-bold ml-1">COACH SPEAKING 🎙️</span>
+                          </div>
+                        ) : (
+                          <span className="text-[10px] font-mono text-zinc-400 mt-2">
+                            Coach camera / screen in standby
                           </span>
                         )}
 
                         <button
-                          onClick={handleToggleCam}
-                          className="mt-2 px-3.5 py-1.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-orange-500/20 transition"
+                          onClick={() => webrtcService.announceStreamReady('webcam')}
+                          className="mt-3 px-3 py-1 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white text-xs font-semibold transition border border-zinc-700 flex items-center gap-1.5"
                         >
-                          <Video className="w-3.5 h-3.5" /> Start Live Camera
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="text-xs text-zinc-500 flex flex-col items-center gap-2">
-                        <div className="w-12 h-12 rounded-xl bg-zinc-800 flex items-center justify-center text-zinc-500">
-                          <VideoOff className="w-5 h-5" />
-                        </div>
-                        <span>Camera Stream Paused</span>
-                        <button
-                          onClick={handleToggleCam}
-                          className="mt-1 px-3 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold transition"
-                        >
-                          Resume Camera
+                          <Radio className="w-3.5 h-3.5 text-orange-400 animate-pulse" /> Re-sync AV Feed
                         </button>
                       </div>
                     )}
-                  </div>
-                )}
 
-                {/* Overlays / Stream Badges */}
-                <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 z-20">
-                  <div className="px-2.5 py-0.5 rounded-full bg-black/70 backdrop-blur-md text-[10px] font-mono font-semibold text-emerald-400 flex items-center gap-1.5 border border-white/10">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                    {isScreenSharing ? 'SCREEN CAST' : isCamStreaming ? 'LIVE WEBCAM' : 'STUDIO BROADCAST'}
-                  </div>
-                </div>
+                    {/* Student View Overlay Badges & Audio Controls */}
+                    <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 z-20">
+                      <div className="px-2.5 py-0.5 rounded-full bg-black/70 backdrop-blur-md text-[10px] font-mono font-semibold text-emerald-400 flex items-center gap-1.5 border border-white/10">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        {coachRemoteStream ? 'GM VIKRAM SEN (LIVE)' : 'COACH STAGE (CONNECTED)'}
+                      </div>
+                    </div>
+
+                    {/* Floating Audio Unmute/Mute button for Student */}
+                    <div className="absolute top-2.5 right-2.5 flex items-center gap-2 z-20">
+                      <button
+                        onClick={() => {
+                          const nextState = !remoteAudioMuted;
+                          setRemoteAudioMuted(nextState);
+                          if (remoteCoachVideoRef.current) {
+                            remoteCoachVideoRef.current.muted = nextState;
+                            if (!nextState) {
+                              remoteCoachVideoRef.current.play().catch(() => {});
+                            }
+                          }
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 backdrop-blur-md transition shadow-md ${
+                          remoteAudioMuted 
+                            ? 'bg-rose-500/80 text-white border border-rose-400/40' 
+                            : 'bg-black/70 text-zinc-200 hover:text-white border border-white/10'
+                        }`}
+                        title={remoteAudioMuted ? 'Click to unmute Coach audio' : 'Click to mute Coach audio'}
+                      >
+                        {remoteAudioMuted ? (
+                          <>
+                            <VolumeX className="w-3.5 h-3.5 text-rose-300" />
+                            <span>Coach Muted</span>
+                          </>
+                        ) : (
+                          <>
+                            <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>Coach Audio On</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </>
+                )}
 
                 <div className="absolute bottom-2.5 right-2.5 px-2 py-0.5 rounded bg-black/60 backdrop-blur-sm text-[10px] font-mono text-zinc-300 z-20">
                   Latency: 28ms
                 </div>
 
-                {isScreenSharing && (
+                {isScreenSharing && isCoach && (
                   <div className="absolute bottom-2.5 left-2.5 px-2 py-0.5 rounded bg-blue-500/80 backdrop-blur-sm text-[10px] font-bold text-white flex items-center gap-1 z-20">
                     <Monitor className="w-3 h-3" /> Sharing Screen
                   </div>
@@ -1205,7 +1522,10 @@ export const ClassroomModule: React.FC = () => {
                 <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                   {studentBoards.map((st, i) => {
                     const isHand = Boolean(st.hand_raised && st.hand_raised !== 0);
-                    const isSpeaking = i % 3 === 1; // Live audio activity indicator
+                    const isSelf = !isCoach && (st.student_id === myStudentId || st.student_id === user?.id);
+                    const hasRemoteStream = Boolean(studentRemoteStreams[st.student_id]);
+                    const hasLiveVideo = isSelf ? isCamStreaming : hasRemoteStream;
+
                     return (
                       <div
                         key={st.student_id}
@@ -1214,34 +1534,74 @@ export const ClassroomModule: React.FC = () => {
                             handleOpenCoPilot(st);
                           }
                         }}
-                        className={`group relative flex flex-col items-center justify-center p-2 rounded-xl border transition cursor-pointer ${
+                        className={`group relative flex flex-col items-center justify-between p-2 rounded-xl border transition min-h-[96px] ${
                           isHand
                             ? 'bg-amber-500/15 border-amber-500/50 hover:bg-amber-500/25 ring-1 ring-amber-500/30'
+                            : isSelf
+                            ? 'bg-blue-500/10 border-blue-500/40'
                             : 'bg-zinc-900/90 border-zinc-800 hover:border-orange-500/40 hover:bg-zinc-800/80'
-                        }`}
-                        title={isCoach ? `Click to Co-Pilot ${st.student_name}` : st.student_name}
+                        } ${isCoach ? 'cursor-pointer' : ''}`}
+                        title={isCoach ? `Click to Co-Pilot ${st.student_name}` : isSelf ? 'Your video stream' : st.student_name}
                       >
-                        <div className="relative mb-1">
-                          <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-zinc-800 to-zinc-700 text-zinc-300 font-bold text-xs flex items-center justify-center border border-zinc-700 group-hover:scale-105 transition-transform">
-                            {st.avatar || st.student_name.charAt(0)}
+                        {/* Video Element or Avatar */}
+                        {hasLiveVideo ? (
+                          <div className="relative w-full aspect-square rounded-lg overflow-hidden bg-black mb-1 border border-zinc-700 shadow-inner">
+                            {isSelf ? (
+                              <video
+                                ref={setVideoRef}
+                                autoPlay
+                                playsInline
+                                muted
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <video
+                                ref={(el) => setStudentVideoRef(st.student_id, el)}
+                                autoPlay
+                                playsInline
+                                muted={false}
+                                className="w-full h-full object-cover"
+                              />
+                            )}
+                            <span className="absolute bottom-0.5 left-0.5 px-1 rounded bg-black/70 text-[8px] font-mono text-emerald-400">
+                              {isSelf ? 'YOU' : 'LIVE'}
+                            </span>
                           </div>
-                          {isHand && (
-                            <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-500 text-zinc-950 text-[10px] font-black flex items-center justify-center animate-bounce shadow">
-                              ✋
-                            </span>
-                          )}
-                          {isSpeaking && (
-                            <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 border-2 border-zinc-900 flex items-center justify-center">
-                              <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping"></span>
-                            </span>
+                        ) : (
+                          <div className="relative mb-1">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs border group-hover:scale-105 transition-transform ${
+                              isSelf 
+                                ? 'bg-blue-600 text-white border-blue-400' 
+                                : 'bg-gradient-to-tr from-zinc-800 to-zinc-700 text-zinc-300 border-zinc-700'
+                            }`}>
+                              {st.avatar || st.student_name.charAt(0)}
+                            </div>
+                            {isHand && (
+                              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-500 text-zinc-950 text-[10px] font-black flex items-center justify-center animate-bounce shadow">
+                                ✋
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        <span className="text-[10px] font-bold text-zinc-300 truncate max-w-full text-center">
+                          {isSelf ? `${st.student_name.split(' ')[0]} (You)` : st.student_name.split(' ')[0]}
+                        </span>
+                        
+                        <div className="flex items-center gap-1 text-[8px] font-mono text-zinc-500">
+                          <span>{st.eval_score || '0.0'}</span>
+                          {isSelf && !isCamStreaming && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleToggleCam();
+                              }}
+                              className="text-[8px] text-blue-400 underline hover:text-white"
+                            >
+                              Cam On
+                            </button>
                           )}
                         </div>
-                        <span className="text-[10px] font-bold text-zinc-300 truncate max-w-full text-center">
-                          {st.student_name.split(' ')[0]}
-                        </span>
-                        <span className="text-[8px] font-mono text-zinc-500">
-                          {st.eval_score || '0.0'}
-                        </span>
                       </div>
                     );
                   })}
