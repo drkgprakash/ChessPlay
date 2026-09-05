@@ -18,11 +18,12 @@ export interface WebRTCSignalPayload {
   from_user_id: string;
   from_user_name: string;
   from_user_role: string;
-  signal_type: 'offer' | 'answer' | 'candidate' | 'stream_ready' | 'stream_ended';
+  signal_type: 'offer' | 'answer' | 'candidate' | 'stream_ready' | 'stream_ended' | 'stream_status';
   signal_data?: any;
 }
 
 export type RemoteStreamCallback = (peerUserId: string, stream: MediaStream, peerRole?: string) => void;
+export type StreamStatusCallback = (data: { from_user_id: string; from_user_role?: string; status: any }) => void;
 
 export function normalizeClassroomPeerId(id: string, role?: string): string {
   if (!id) return '';
@@ -53,6 +54,7 @@ class WebRTCManager {
   private remoteStreams: Map<string, MediaStream> = new Map();
   private localStream: MediaStream | null = null;
   private onRemoteStreamCallback: RemoteStreamCallback | null = null;
+  private onStreamStatusCallback: StreamStatusCallback | null = null;
   private currentUserId: string = '';
   private currentUserName: string = '';
   private currentUserRole: string = '';
@@ -88,31 +90,65 @@ class WebRTCManager {
     this.onRemoteStreamCallback = onRemoteStream;
   }
 
+  public onStreamStatus(cb: StreamStatusCallback) {
+    this.onStreamStatusCallback = cb;
+  }
+
   public async setLocalStream(stream: MediaStream | null) {
     this.localStream = stream;
+    const videoTrack = stream ? stream.getVideoTracks()[0] || null : null;
+    const audioTrack = stream ? stream.getAudioTracks()[0] || null : null;
 
     // Update tracks on all active peer connections
     for (const [normPeerId, pc] of this.peerConnections.entries()) {
       const senders = pc.getSenders();
-      if (stream) {
-        for (const track of stream.getTracks()) {
-          const sender = senders.find((s) => s.track && s.track.kind === track.kind);
-          if (sender) {
-            await sender.replaceTrack(track).catch(err => console.warn('replaceTrack:', err));
-          } else {
-            pc.addTrack(track, stream);
-          }
-        }
-      } else {
-        senders.forEach((s) => {
-          pc.removeTrack(s);
-        });
+      const videoSender = senders.find(
+        (s) => s.track?.kind === 'video' || pc.getTransceivers().find(t => t.sender === s && (t.receiver.track.kind === 'video' || t.mid === '1' || t.mid === 'video'))
+      );
+      const audioSender = senders.find(
+        (s) => s.track?.kind === 'audio' || pc.getTransceivers().find(t => t.sender === s && (t.receiver.track.kind === 'audio' || t.mid === '0' || t.mid === 'audio'))
+      );
+
+      // Handle video track: if paused/null, replaceTrack(null) stops sending video frames cleanly
+      if (videoSender) {
+        await videoSender.replaceTrack(videoTrack).catch(err => console.warn('replaceTrack video:', err));
+      } else if (videoTrack) {
+        pc.addTrack(videoTrack, stream!);
+      }
+
+      // Handle audio track: if unmuted, replaceTrack(audioTrack) ensures audio continues uninterrupted
+      if (audioSender) {
+        await audioSender.replaceTrack(audioTrack).catch(err => console.warn('replaceTrack audio:', err));
+      } else if (audioTrack) {
+        pc.addTrack(audioTrack, stream!);
       }
     }
   }
 
   public getLocalStream(): MediaStream | null {
     return this.localStream;
+  }
+
+  // Broadcast stream status (camera paused/resumed, mic on/off) in real time
+  public async announceStreamStatus(status: { cam_active: boolean; mic_active: boolean; screen_active?: boolean; stream_type?: string }) {
+    const payload: WebRTCSignalPayload = {
+      target_user_id: 'all',
+      from_user_id: this.currentUserId,
+      from_user_name: this.currentUserName,
+      from_user_role: this.currentUserRole,
+      signal_type: 'stream_status',
+      signal_data: status
+    };
+
+    if (this.broadcastChannel) {
+      try {
+        this.broadcastChannel.postMessage(payload);
+      } catch {}
+    }
+
+    if (this.sendSignalFn) {
+      await this.sendSignalFn(payload).catch(() => {});
+    }
   }
 
   // Broadcast that this peer is active and ready to stream
@@ -133,7 +169,7 @@ class WebRTCManager {
     }
 
     if (this.sendSignalFn) {
-      await this.sendSignalFn(payload);
+      await this.sendSignalFn(payload).catch(() => {});
     }
   }
 
@@ -308,6 +344,14 @@ class WebRTCManager {
           if (pc.signalingState === 'stable') {
             await this.callPeer(fromNormId, peerRole);
           }
+        }
+      } else if (signal.signal_type === 'stream_status' && signal.signal_data) {
+        if (this.onStreamStatusCallback) {
+          this.onStreamStatusCallback({
+            from_user_id: signal.from_user_id,
+            from_user_role: signal.from_user_role,
+            status: signal.signal_data
+          });
         }
       } else if (signal.signal_type === 'offer' && signal.signal_data?.sdp) {
         const pc = this.getOrCreatePeerConnection(fromNormId, peerRole);

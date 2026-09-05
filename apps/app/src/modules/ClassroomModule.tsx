@@ -383,6 +383,29 @@ export const ClassroomModule: React.FC = () => {
       }
     );
 
+    // Listen for real-time sub-second stream status updates from peers (camera pause/resume, mic mute/unmute)
+    webrtcService.onStreamStatus(({ from_user_id, from_user_role, status }) => {
+      const isPeerCoach = normalizeClassroomPeerId(from_user_id, from_user_role) === 'coach';
+      if (isPeerCoach) {
+        setCoachStreamStatus(prev => ({
+          ...prev,
+          cam_active: Boolean(status.cam_active),
+          mic_active: Boolean(status.mic_active),
+          screen_active: Boolean(status.screen_active),
+          stream_type: status.stream_type || 'webcam'
+        }));
+      } else {
+        const normSid = normalizeClassroomPeerId(from_user_id, from_user_role);
+        setStudentStreamStatuses(prev => ({
+          ...prev,
+          [normSid]: {
+            cam_active: Boolean(status.cam_active),
+            mic_active: Boolean(status.mic_active)
+          }
+        }));
+      }
+    });
+
     // Announce presence / stream status to peers
     webrtcService.announceStreamReady('webcam');
     if (!isCoach) {
@@ -428,18 +451,20 @@ export const ClassroomModule: React.FC = () => {
             if (ev.event_type === 'webrtc_signal' && ev.payload) {
               webrtcService.handleIncomingSignal(ev.payload);
             } else if (ev.event_type === 'stream_status' && ev.payload) {
-              const isPeerCoach = ev.user_role === 'head_coach' || ev.user_role === 'saas_owner' || ev.user_role === 'academy_admin' || String(ev.user_id).includes('coach');
+              const isPeerCoach = normalizeClassroomPeerId(ev.user_id, ev.user_role) === 'coach';
               if (isPeerCoach) {
-                setCoachStreamStatus({
+                setCoachStreamStatus(prev => ({
+                  ...prev,
                   cam_active: Boolean(ev.payload.cam_active),
                   mic_active: Boolean(ev.payload.mic_active),
                   screen_active: Boolean(ev.payload.screen_active),
                   stream_type: ev.payload.stream_type || 'webcam'
-                });
+                }));
               } else {
+                const normSid = normalizeClassroomPeerId(ev.user_id, ev.user_role);
                 setStudentStreamStatuses(prev => ({
                   ...prev,
-                  [String(ev.user_id)]: {
+                  [normSid]: {
                     cam_active: Boolean(ev.payload.cam_active),
                     mic_active: Boolean(ev.payload.mic_active)
                   }
@@ -719,14 +744,56 @@ export const ClassroomModule: React.FC = () => {
   }, []);
 
   // Toggle Mic
-  const handleToggleMic = () => {
+  const handleToggleMic = async () => {
     const nextMic = !micOn;
     setMicOn(nextMic);
+
     if (localStreamRef.current) {
-      localStreamRef.current.getAudioTracks().forEach(track => {
-        track.enabled = nextMic;
-      });
+      const audioTracks = localStreamRef.current.getAudioTracks();
+      if (audioTracks.length > 0) {
+        audioTracks.forEach(track => {
+          track.enabled = nextMic;
+        });
+      } else if (nextMic) {
+        // Stream has video but no audio track, capture audio track
+        try {
+          const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const newAudioTrack = micStream.getAudioTracks()[0];
+          if (newAudioTrack) {
+            localStreamRef.current.addTrack(newAudioTrack);
+            await webrtcService.setLocalStream(localStreamRef.current);
+          }
+        } catch (e) {
+          console.warn('Could not acquire microphone:', e);
+        }
+      }
+
+      if (!nextMic && !isCamStreaming && !isScreenSharing) {
+        // Muted mic while camera was already off - tear down audio-only stream
+        localStreamRef.current.getTracks().forEach(t => t.stop());
+        localStreamRef.current = null;
+        await webrtcService.setLocalStream(null);
+      }
+    } else if (nextMic) {
+      // Camera is paused/off, but user enables mic to speak in real time!
+      try {
+        const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        localStreamRef.current = micStream;
+        await webrtcService.setLocalStream(micStream);
+        webrtcService.announceStreamReady(isScreenSharing ? 'screen' : 'webcam');
+      } catch (e) {
+        console.warn('Could not acquire microphone:', e);
+      }
     }
+
+    const statusPayload = {
+      cam_active: isCamStreaming,
+      mic_active: nextMic,
+      screen_active: isScreenSharing,
+      stream_type: isScreenSharing ? 'screen' : 'webcam'
+    };
+    webrtcService.announceStreamStatus(statusPayload);
+
     if (token) {
       classroomService.broadcastStreamStatus(
         batchId, 
@@ -743,16 +810,46 @@ export const ClassroomModule: React.FC = () => {
   // Toggle Camera Stream
   const handleToggleCam = async () => {
     if (isCamStreaming) {
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(t => t.stop());
-        localStreamRef.current = null;
-      }
       if (videoRef.current) {
         videoRef.current.srcObject = null;
       }
       setIsCamStreaming(false);
       setCamOn(false);
-      webrtcService.setLocalStream(null);
+
+      // Stop ONLY video tracks so mic audio stays alive if mic is on
+      let audioOnlyStream: MediaStream | null = null;
+      if (localStreamRef.current) {
+        localStreamRef.current.getVideoTracks().forEach(t => t.stop());
+        const remainingAudioTracks = localStreamRef.current.getAudioTracks();
+        if (micOn && remainingAudioTracks.length > 0) {
+          audioOnlyStream = new MediaStream(remainingAudioTracks);
+          localStreamRef.current = audioOnlyStream;
+        } else {
+          localStreamRef.current.getTracks().forEach(t => t.stop());
+          localStreamRef.current = null;
+        }
+      }
+
+      if (micOn && !audioOnlyStream) {
+        try {
+          audioOnlyStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          localStreamRef.current = audioOnlyStream;
+        } catch (e) {
+          console.warn('Could not retain mic audio:', e);
+        }
+      }
+
+      await webrtcService.setLocalStream(audioOnlyStream);
+
+      // Instant status broadcast via WebRTC & BroadcastChannel
+      const statusPayload = {
+        cam_active: false,
+        mic_active: micOn,
+        screen_active: false,
+        stream_type: 'webcam'
+      };
+      webrtcService.announceStreamStatus(statusPayload);
+
       if (token) {
         classroomService.broadcastStreamStatus(
           batchId, 
@@ -785,8 +882,16 @@ export const ClassroomModule: React.FC = () => {
           videoRef.current.play().catch(err => console.warn('Camera play:', err));
         }
 
-        webrtcService.setLocalStream(stream);
+        await webrtcService.setLocalStream(stream);
         webrtcService.announceStreamReady('webcam');
+
+        const statusPayload = {
+          cam_active: true,
+          mic_active: micOn,
+          screen_active: false,
+          stream_type: 'webcam'
+        };
+        webrtcService.announceStreamStatus(statusPayload);
 
         if (token) {
           classroomService.broadcastStreamStatus(
@@ -810,10 +915,30 @@ export const ClassroomModule: React.FC = () => {
         }
 
         stream.getVideoTracks().forEach(track => {
-          track.onended = () => {
+          track.onended = async () => {
             setIsCamStreaming(false);
             if (videoRef.current) videoRef.current.srcObject = null;
-            webrtcService.setLocalStream(null);
+            
+            let audioOnlyStream: MediaStream | null = null;
+            if (localStreamRef.current) {
+              const remainingAudioTracks = localStreamRef.current.getAudioTracks();
+              if (micOn && remainingAudioTracks.length > 0) {
+                audioOnlyStream = new MediaStream(remainingAudioTracks);
+                localStreamRef.current = audioOnlyStream;
+              } else {
+                localStreamRef.current = null;
+              }
+            }
+            await webrtcService.setLocalStream(audioOnlyStream);
+
+            const endedStatus = {
+              cam_active: false,
+              mic_active: micOn,
+              screen_active: false,
+              stream_type: 'webcam'
+            };
+            webrtcService.announceStreamStatus(endedStatus);
+
             if (token) {
               classroomService.broadcastStreamStatus(
                 batchId, 
@@ -838,19 +963,38 @@ export const ClassroomModule: React.FC = () => {
   // Toggle Screen Share
   const handleToggleScreenShare = async () => {
     if (isScreenSharing) {
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(t => t.stop());
-        localStreamRef.current = null;
-      }
       if (videoRef.current) {
         videoRef.current.srcObject = null;
       }
       setIsScreenSharing(false);
-      webrtcService.setLocalStream(null);
+
+      let audioOnlyStream: MediaStream | null = null;
+      if (localStreamRef.current) {
+        localStreamRef.current.getVideoTracks().forEach(t => t.stop());
+        const remainingAudioTracks = localStreamRef.current.getAudioTracks();
+        if (micOn && remainingAudioTracks.length > 0) {
+          audioOnlyStream = new MediaStream(remainingAudioTracks);
+          localStreamRef.current = audioOnlyStream;
+        } else {
+          localStreamRef.current.getTracks().forEach(t => t.stop());
+          localStreamRef.current = null;
+        }
+      }
+
+      await webrtcService.setLocalStream(audioOnlyStream);
+
+      const statusPayload = {
+        cam_active: isCamStreaming,
+        mic_active: micOn,
+        screen_active: false,
+        stream_type: isCamStreaming ? 'webcam' : 'webcam'
+      };
+      webrtcService.announceStreamStatus(statusPayload);
+
       if (token) {
         classroomService.broadcastStreamStatus(
           batchId, 
-          false, 
+          isCamStreaming, 
           micOn, 
           false, 
           'screen', 
@@ -874,13 +1018,21 @@ export const ClassroomModule: React.FC = () => {
           videoRef.current.play().catch(err => console.warn('Screen share play:', err));
         }
 
-        webrtcService.setLocalStream(stream);
+        await webrtcService.setLocalStream(stream);
         webrtcService.announceStreamReady('screen');
+
+        const statusPayload = {
+          cam_active: false,
+          mic_active: micOn,
+          screen_active: true,
+          stream_type: 'screen'
+        };
+        webrtcService.announceStreamStatus(statusPayload);
 
         if (token) {
           classroomService.broadcastStreamStatus(
             batchId, 
-            true, 
+            false, 
             micOn, 
             true, 
             'screen', 
@@ -889,30 +1041,44 @@ export const ClassroomModule: React.FC = () => {
           );
         }
 
-        if (isCoach) {
-          studentBoards.forEach(sb => {
-            webrtcService.callPeer(sb.student_id, 'student');
-          });
-        } else {
-          webrtcService.callPeer('coach', 'head_coach');
-        }
+        stream.getVideoTracks().forEach(track => {
+          track.onended = async () => {
+            setIsScreenSharing(false);
+            if (videoRef.current) videoRef.current.srcObject = null;
+            
+            let audioOnlyStream: MediaStream | null = null;
+            if (localStreamRef.current) {
+              const remainingAudioTracks = localStreamRef.current.getAudioTracks();
+              if (micOn && remainingAudioTracks.length > 0) {
+                audioOnlyStream = new MediaStream(remainingAudioTracks);
+                localStreamRef.current = audioOnlyStream;
+              } else {
+                localStreamRef.current = null;
+              }
+            }
+            await webrtcService.setLocalStream(audioOnlyStream);
 
-        stream.getVideoTracks()[0].onended = () => {
-          setIsScreenSharing(false);
-          if (videoRef.current) videoRef.current.srcObject = null;
-          webrtcService.setLocalStream(null);
-          if (token) {
-            classroomService.broadcastStreamStatus(
-              batchId, 
-              false, 
-              micOn, 
-              false, 
-              'screen', 
-              token,
-              isCoach ? 'coach' : (myStudentId || 'st-1')
-            );
-          }
-        };
+            const endedStatus = {
+              cam_active: false,
+              mic_active: micOn,
+              screen_active: false,
+              stream_type: 'screen'
+            };
+            webrtcService.announceStreamStatus(endedStatus);
+
+            if (token) {
+              classroomService.broadcastStreamStatus(
+                batchId, 
+                false, 
+                micOn, 
+                false, 
+                'screen', 
+                token,
+                isCoach ? 'coach' : (myStudentId || 'st-1')
+              );
+            }
+          };
+        });
       } catch (err: any) {
         console.warn('Screen share error:', err);
         setIsScreenSharing(false);
@@ -1125,8 +1291,9 @@ export const ClassroomModule: React.FC = () => {
   // Current student personal board
   const myCurrentBoard = studentBoards.find(s => s.student_id === myStudentId || s.student_id === user?.id) || studentBoards[0];
 
-  // Whether coach's remote stream has an active video track
+  // Whether coach's remote stream has an active video track AND coach is actively broadcasting video/screen
   const coachHasVideo = Boolean(
+    (coachStreamStatus.cam_active || coachStreamStatus.screen_active) &&
     coachRemoteStream &&
     coachRemoteStream.getVideoTracks().some(t => t.readyState === 'live' && t.enabled)
   );
@@ -1531,25 +1698,31 @@ export const ClassroomModule: React.FC = () => {
                           ♟️
                         </div>
                         <div className="text-sm font-bold text-white">GM Vikram Sen</div>
-                        <div className="text-xs text-orange-400 font-medium">Head Coach • Masterclass Stream</div>
+                        <div className="text-xs text-orange-400 font-medium">Head Coach • Masterclass Stage</div>
 
                         {coachStreamStatus.mic_active || (coachRemoteStream && coachRemoteStream.getAudioTracks().length > 0) ? (
-                          <div className="flex items-center gap-1.5 h-5 mt-2">
-                            <div className="flex items-center gap-0.5">
-                              {audioWave.map((h, i) => (
-                                <div
-                                  key={i}
-                                  className="w-1 bg-emerald-400 rounded-full transition-all duration-150"
-                                  style={{ height: `${Math.max(6, h * 0.4)}px` }}
-                                />
-                              ))}
+                          <div className="flex flex-col items-center gap-1 mt-2.5">
+                            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-mono text-[11px] font-bold shadow-lg shadow-emerald-500/10">
+                              <div className="flex items-center gap-0.5 mr-1">
+                                {audioWave.map((h, i) => (
+                                  <div
+                                    key={i}
+                                    className="w-1 bg-emerald-400 rounded-full transition-all duration-150"
+                                    style={{ height: `${Math.max(6, h * 0.4)}px` }}
+                                  />
+                                ))}
+                              </div>
+                              COACH SPEAKING • AUDIO LIVE 🎙️
                             </div>
-                            <span className="text-[10px] font-mono text-emerald-400 font-bold ml-1">COACH SPEAKING 🎙️</span>
+                            <span className="text-[10px] text-zinc-400 mt-0.5">
+                              Broadcast camera is paused by coach. Audio is streaming in real time.
+                            </span>
                           </div>
                         ) : (
-                          <span className="text-[10px] font-mono text-zinc-400 mt-2">
-                            Coach camera / screen in standby
-                          </span>
+                          <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-800/80 border border-zinc-700 text-zinc-400 text-[11px] font-medium mt-2.5">
+                            <VolumeX className="w-3.5 h-3.5 text-zinc-500" />
+                            Coach Camera & Audio in Standby
+                          </div>
                         )}
 
                         <button
@@ -1563,9 +1736,19 @@ export const ClassroomModule: React.FC = () => {
 
                     {/* Student View Overlay Badges & Audio Controls */}
                     <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 z-20">
-                      <div className="px-2.5 py-0.5 rounded-full bg-black/70 backdrop-blur-md text-[10px] font-mono font-semibold text-emerald-400 flex items-center gap-1.5 border border-white/10">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                        {coachHasVideo ? 'GM VIKRAM SEN (LIVE)' : 'COACH STAGE (CONNECTED)'}
+                      <div className={`px-2.5 py-0.5 rounded-full backdrop-blur-md text-[10px] font-mono font-semibold flex items-center gap-1.5 border border-white/10 ${
+                        coachHasVideo 
+                          ? 'bg-black/70 text-emerald-400' 
+                          : coachStreamStatus.mic_active 
+                          ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/30' 
+                          : 'bg-black/70 text-zinc-400'
+                      }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${coachHasVideo || coachStreamStatus.mic_active ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-500'}`}></span>
+                        {coachHasVideo 
+                          ? (coachStreamStatus.screen_active ? 'GM VIKRAM SEN (SCREEN CAST)' : 'GM VIKRAM SEN (LIVE)') 
+                          : coachStreamStatus.mic_active
+                          ? 'GM VIKRAM SEN (AUDIO LIVE)'
+                          : 'COACH STAGE (CAMERA PAUSED)'}
                       </div>
                     </div>
 
@@ -1630,8 +1813,12 @@ export const ClassroomModule: React.FC = () => {
                   {studentBoards.map((st, i) => {
                     const isHand = Boolean(st.hand_raised && st.hand_raised !== 0);
                     const isSelf = !isCoach && (st.student_id === myStudentId || st.student_id === user?.id);
+                    const stStatus = studentStreamStatuses[st.student_id];
                     const hasRemoteStream = Boolean(studentRemoteStreams[st.student_id]);
-                    const hasLiveVideo = isSelf ? isCamStreaming : hasRemoteStream;
+                    const remoteHasCam = stStatus 
+                      ? Boolean(stStatus.cam_active) 
+                      : (hasRemoteStream && Boolean(studentRemoteStreams[st.student_id].getVideoTracks().some(t => t.readyState === 'live' && t.enabled)));
+                    const hasLiveVideo = isSelf ? isCamStreaming : (hasRemoteStream && remoteHasCam);
 
                     return (
                       <div
@@ -1676,6 +1863,16 @@ export const ClassroomModule: React.FC = () => {
                           </div>
                         ) : (
                           <div className="relative mb-1">
+                            {/* Keep remote student audio playing in background when remote camera is paused/off */}
+                            {hasRemoteStream && !isSelf && (
+                              <video
+                                ref={(el) => setStudentVideoRef(st.student_id, el)}
+                                autoPlay
+                                playsInline
+                                muted={false}
+                                className="hidden pointer-events-none"
+                              />
+                            )}
                             <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs border group-hover:scale-105 transition-transform ${
                               isSelf 
                                 ? 'bg-blue-600 text-white border-blue-400' 
