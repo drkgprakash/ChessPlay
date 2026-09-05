@@ -64,7 +64,10 @@ if ($action === 'seed_auth' || $action === 'migrate') {
             "avatar_emoji VARCHAR(10) DEFAULT '♟️'",
             "phone VARCHAR(30) NULL",
             "is_active BOOLEAN DEFAULT TRUE",
-            "last_login_at TIMESTAMP NULL"
+            "last_login_at TIMESTAMP NULL",
+            "fide_title VARCHAR(20) NULL",
+            "rating INT DEFAULT 1500",
+            "notes TEXT NULL"
         ];
         foreach ($userCols as $colDef) {
             try {
@@ -74,6 +77,42 @@ if ($action === 'seed_auth' || $action === 'migrate') {
             }
         }
 
+        // Batches Table
+        $pdo->exec("
+        CREATE TABLE IF NOT EXISTS batches (
+            id VARCHAR(36) PRIMARY KEY,
+            academy_id VARCHAR(36) NOT NULL,
+            name VARCHAR(100) NOT NULL,
+            coach_id VARCHAR(36) NULL,
+            schedule VARCHAR(100) NULL,
+            level ENUM('beginner', 'intermediate', 'advanced', 'master') DEFAULT 'intermediate',
+            max_students INT DEFAULT 15,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+        CREATE TABLE IF NOT EXISTS students (
+            id VARCHAR(36) PRIMARY KEY,
+            academy_id VARCHAR(36) NOT NULL,
+            batch_id VARCHAR(36) NULL,
+            name VARCHAR(100) NOT NULL,
+            email VARCHAR(150) NULL,
+            phone VARCHAR(30) NULL,
+            rating INT DEFAULT 1200,
+            fide_id VARCHAR(30) NULL,
+            parent_name VARCHAR(100) NULL,
+            parent_phone VARCHAR(30) NULL,
+            parent_email VARCHAR(150) NULL,
+            attendance_pct INT DEFAULT 92,
+            puzzles_solved INT DEFAULT 0,
+            homework_pct INT DEFAULT 85,
+            status ENUM('active', 'inactive', 'trial', 'paused') DEFAULT 'active',
+            notes TEXT NULL,
+            avatar_emoji VARCHAR(10) DEFAULT '👦',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ");
+
         // Seed Academies
         $pdo->exec("
         INSERT INTO academies (id, name, slug, plan_tier, primary_color, whatsapp_number, status)
@@ -82,6 +121,43 @@ if ($action === 'seed_auth' || $action === 'migrate') {
         ('acad-002', 'KnightSquad Club', 'knightsquad', 'enterprise', '#3b82f6', '+919876543211', 'active')
         ON DUPLICATE KEY UPDATE name = VALUES(name), plan_tier = VALUES(plan_tier);
         ");
+
+        // Seed Batches
+        $pdo->exec("
+        INSERT INTO batches (id, academy_id, name, coach_id, schedule, level, max_students)
+        VALUES 
+        ('batch-01', 'acad-001', 'Batch Alpha (1400-1800)', 'usr-headcoach', 'Mon, Wed, Fri 5:00 PM IST', 'advanced', 12),
+        ('batch-02', 'acad-001', 'Master Champions (1800+)', 'usr-headcoach', 'Tue, Thu, Sat 6:30 PM IST', 'master', 10),
+        ('batch-03', 'acad-001', 'Beginner Knights (800-1200)', 'usr-asstcoach', 'Sat, Sun 10:00 AM IST', 'beginner', 15)
+        ON DUPLICATE KEY UPDATE name = VALUES(name), schedule = VALUES(schedule);
+        ");
+
+        // Seed Realistic Active Students for Achiever's Chess Academy
+        $initialStudents = [
+            ['st-1', 'acad-001', 'batch-01', 'Aarav Sharma', 'aarav.sharma@gmail.com', '+919812345671', 1640, 'FIDE-IND-2401', 'Suresh Sharma', '+919812345670', 'suresh.sharma@gmail.com', 96, 142, 94, 'active', 'Excellent understanding of central pawn levers. Working on rook and pawn endgames.', '👦'],
+            ['st-2', 'acad-001', 'batch-01', 'Diya Patel', 'diya.patel@gmail.com', '+919823456782', 1580, 'FIDE-IND-2402', 'Kiran Patel', '+919823456780', 'kiran.patel@gmail.com', 92, 128, 88, 'active', 'Sharp attacking instincts in Sicilian Najdorf. Needs to tighten defensive king safety.', '👧'],
+            ['st-3', 'acad-001', 'batch-01', 'Rohan Iyer', 'rohan.iyer@gmail.com', '+919834567893', 1520, 'FIDE-IND-2403', 'Venkatesh Iyer', '+919834567890', 'venkat.iyer@gmail.com', 88, 110, 85, 'active', 'Good positional instincts. Recommended more tactical puzzle drills on pins.', '🧑'],
+            ['st-4', 'acad-001', 'batch-01', 'Kabir Verma', 'kabir.verma@gmail.com', '+919845678904', 1490, 'FIDE-IND-2404', 'Anil Verma', '+919845678900', 'anil.verma@gmail.com', 85, 95, 80, 'active', 'Pawn structures improving nicely. Advised to review London system theory.', '👦'],
+            ['st-5', 'acad-001', 'batch-01', 'Ananya Gupta', 'ananya.gupta@gmail.com', '+919856789015', 1430, 'FIDE-IND-2405', 'Rakesh Gupta', '+919856789010', 'rakesh.gupta@gmail.com', 95, 115, 91, 'active', 'Very diligent with homework. Strong progress in middle-game planning.', '👧'],
+            ['st-6', 'acad-001', 'batch-01', 'Meera Nair', 'meera.nair@gmail.com', '+919867890126', 1510, 'FIDE-IND-2406', 'Deepak Nair', '+919867890120', 'deepak.nair@gmail.com', 91, 105, 89, 'active', 'Solid tactical vision. Currently analyzing French Defense Winawer variation.', '👧']
+        ];
+
+        $stdStmt = $pdo->prepare("
+            INSERT INTO students (id, academy_id, batch_id, name, email, phone, rating, fide_id, parent_name, parent_phone, parent_email, attendance_pct, puzzles_solved, homework_pct, status, notes, avatar_emoji)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE 
+                name = VALUES(name),
+                rating = VALUES(rating),
+                batch_id = VALUES(batch_id),
+                parent_phone = VALUES(parent_phone),
+                notes = VALUES(notes),
+                status = VALUES(status);
+        ");
+
+        foreach ($initialStudents as $st) {
+            $stdStmt->execute($st);
+        }
+
 
         // Demo accounts configuration
         $demoUsers = [
