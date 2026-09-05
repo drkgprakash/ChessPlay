@@ -4,21 +4,24 @@ import {
   Filter, Sparkles, TrendingUp, Edit3, Trash2, X, AlertCircle, 
   RefreshCw, Award, MessageCircle, Phone, Mail, CheckCircle2, 
   Clock, Shield, ArrowRight, UserCheck, Layers, Printer,
-  CreditCard, Check, DollarSign, Receipt, Download
+  CreditCard, Check, DollarSign, Receipt, Download, Camera, QrCode
 } from 'lucide-react';
 import { useAuth } from '../services/authContext';
 import { userService, Student, Batch } from '../services/userService';
 import { ReportCardModal } from '../components/ReportCardModal';
 import { billingService, StudentFee, BillingMetrics } from '../services/billingService';
 import { FeeInvoiceModal } from '../components/FeeInvoiceModal';
+import { attendanceService, AttendanceStudent, AttendanceMetrics } from '../services/attendanceService';
+import { StudentIDCardModal } from '../components/StudentIDCardModal';
+import { AttendanceScannerModal } from '../components/AttendanceScannerModal';
 
 export const AcademyModule: React.FC = () => {
   const { user, token } = useAuth();
   const canManage = user?.role === 'saas_owner' || user?.role === 'academy_admin' || user?.role === 'head_coach';
   const isAdminOrOwner = user?.role === 'saas_owner' || user?.role === 'academy_admin';
 
-  // Sub-Navigation Tab: 'students' | 'batches' | 'billing'
-  const [activeTab, setActiveTab] = useState<'students' | 'batches' | 'billing'>('students');
+  // Sub-Navigation Tab: 'students' | 'batches' | 'billing' | 'attendance'
+  const [activeTab, setActiveTab] = useState<'students' | 'batches' | 'billing' | 'attendance'>('students');
 
   // Students & Batches State
   const [students, setStudents] = useState<Student[]>([]);
@@ -44,6 +47,16 @@ export const AcademyModule: React.FC = () => {
     notes: ''
   });
   const [feeActionSuccess, setFeeActionSuccess] = useState<string>('');
+
+  // Attendance & QR Check-in State
+  const [attendanceStudents, setAttendanceStudents] = useState<AttendanceStudent[]>([]);
+  const [attendanceMetrics, setAttendanceMetrics] = useState<AttendanceMetrics | null>(null);
+  const [attendanceBatchId, setAttendanceBatchId] = useState<string>('batch-01');
+  const [attendanceDate, setAttendanceDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [isAttendanceLoading, setIsAttendanceLoading] = useState<boolean>(false);
+  const [showScannerModal, setShowScannerModal] = useState<boolean>(false);
+  const [idCardStudent, setIdCardStudent] = useState<any | null>(null);
+  const [attendanceNotice, setAttendanceNotice] = useState<string>('');
 
   // Student Modals state
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
@@ -151,6 +164,75 @@ export const AcademyModule: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [feeSearchQuery]);
+
+  // Load batch attendance roster & session metrics
+  const loadAttendanceData = async () => {
+    if (!token) return;
+    setIsAttendanceLoading(true);
+    const res = await attendanceService.getBatchAttendance(token, attendanceBatchId, attendanceDate);
+    if (res && res.students) {
+      setAttendanceStudents(res.students);
+      setAttendanceMetrics(res.metrics);
+    }
+    setIsAttendanceLoading(false);
+  };
+
+  useEffect(() => {
+    if (token && (activeTab === 'attendance' || !attendanceMetrics)) {
+      loadAttendanceData();
+    }
+  }, [token, activeTab, attendanceBatchId, attendanceDate]);
+
+  // Handle single student attendance status click (Present, Late, Absent, Excused)
+  const handleStudentStatusChange = async (studentId: string, newStatus: 'present' | 'absent' | 'late' | 'excused') => {
+    if (!token) return;
+    const res = await attendanceService.checkIn(token, {
+      student_id: studentId,
+      batch_id: attendanceBatchId,
+      session_date: attendanceDate,
+      status: newStatus,
+      method: 'manual',
+      notes: `Status updated to ${newStatus} by instructor`
+    });
+
+    if (res.status === 'success') {
+      setAttendanceNotice(res.message);
+      setTimeout(() => setAttendanceNotice(''), 3500);
+      loadAttendanceData();
+    }
+  };
+
+  // Bulk mark all students in batch as present
+  const handleBulkMarkPresent = async () => {
+    if (!token) return;
+    const res = await attendanceService.bulkMark(token, attendanceBatchId, 'present', attendanceDate);
+    if (res.status === 'success') {
+      setAttendanceNotice(`All ${res.count} batch students marked Present!`);
+      setTimeout(() => setAttendanceNotice(''), 4000);
+      loadAttendanceData();
+    }
+  };
+
+  // Send Check-In WhatsApp Notification to Parent
+  const handleSendAttendanceWhatsApp = (student: AttendanceStudent) => {
+    const parentPhone = (student.parent_phone || '').replace(/[^0-9]/g, '');
+    const academyName = user?.academyName || "Achiever's Chess Academy";
+    const statusText = (student.status || 'present').toUpperCase();
+    const formattedTime = student.checkin_time ? student.checkin_time.slice(0, 5) : 'Class Scheduled';
+    
+    const message = `♟️ *${academyName} — Classroom Check-In Alert*\n\n`
+      + `Dear ${student.parent_name || 'Parent'},\n\n`
+      + `This is to confirm that *${student.name}* has been marked *${statusText}* for today's chess training session.\n\n`
+      + `• *Date:* ${attendanceDate}\n`
+      + `• *Time:* ${formattedTime}\n`
+      + `• *Batch:* ${student.batch_name || 'Batch Alpha'}\n`
+      + `• *Overall Attendance:* ${student.cumulative_attendance_pct || 95}%\n\n`
+      + `_Sent via Chess Play Academy Attendance System_`;
+
+    const encoded = encodeURIComponent(message);
+    const targetUrl = parentPhone ? `https://wa.me/${parentPhone}?text=${encoded}` : `https://wa.me/?text=${encoded}`;
+    window.open(targetUrl, '_blank');
+  };
 
   // Form Validation - Student
   const validateStudentForm = () => {
@@ -514,6 +596,25 @@ _Sent via Chess Play Academy Platform_`;
               </span>
             )}
           </button>
+
+          <button
+            onClick={() => setActiveTab('attendance')}
+            className={`px-4 py-2 rounded-xl transition flex items-center gap-2 ${
+              activeTab === 'attendance'
+                ? 'bg-gradient-to-r from-orange-500 to-amber-600 text-white shadow-md'
+                : 'text-zinc-400 hover:text-white'
+            }`}
+          >
+            <Camera className="w-4 h-4" />
+            <span>QR Attendance</span>
+            {attendanceMetrics && (
+              <span className={`text-[10px] px-2 py-0.2 rounded-full font-mono font-bold ${
+                activeTab === 'attendance' ? 'bg-black/30 text-white' : 'bg-zinc-800 text-zinc-400'
+              }`}>
+                {attendanceMetrics.present_count + attendanceMetrics.late_count}/{attendanceMetrics.total_students} Present
+              </span>
+            )}
+          </button>
         </div>
 
         <div className="flex items-center gap-2">
@@ -521,12 +622,22 @@ _Sent via Chess Play Academy Platform_`;
             onClick={() => {
               loadData();
               loadFeeData();
+              loadAttendanceData();
             }}
             className="p-2.5 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 transition"
             title="Refresh Database"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
+
+          {activeTab === 'attendance' && (
+            <button
+              onClick={() => setShowScannerModal(true)}
+              className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-orange-500/20 transition"
+            >
+              <Camera className="w-4 h-4" /> Scan Attendance QR
+            </button>
+          )}
 
           {activeTab === 'students' && canManage && (
             <button
@@ -907,7 +1018,7 @@ _Sent via Chess Play Academy Platform_`;
             })}
           </div>
         </div>
-      ) : (
+      ) : activeTab === 'billing' ? (
         /* ========================================================= */
         /* 3. FEE BILLING & INVOICES TAB                             */
         /* ========================================================= */
@@ -1191,6 +1302,324 @@ _Sent via Chess Play Academy Platform_`;
                                 onClick={() => handleSendFeeWhatsApp(fee)}
                                 className="p-1.5 rounded-xl bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition border border-emerald-500/30"
                                 title={isPaid ? "Send Receipt via WhatsApp" : "Send Fee Reminder via WhatsApp"}
+                              >
+                                <MessageCircle className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        /* ========================================================= */
+        /* 4. STUDENT QR ATTENDANCE & CHECK-IN TAB                   */
+        /* ========================================================= */
+        <div className="space-y-6 animate-in fade-in">
+          {/* Header & Session Controller */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-5 shadow-lg flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-black text-white flex items-center gap-2">
+                <Camera className="w-5 h-5 text-orange-400" />
+                Student QR Attendance & Session Check-In
+              </h3>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                Scan digital student ID badges with camera, track attendance in real-time, and notify parents on WhatsApp with 1-click.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* Batch Selector */}
+              <select
+                value={attendanceBatchId}
+                onChange={(e) => setAttendanceBatchId(e.target.value)}
+                className="px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-zinc-300 focus:outline-none focus:border-orange-500"
+              >
+                {batches.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+
+              {/* Session Date Picker */}
+              <input
+                type="date"
+                value={attendanceDate}
+                onChange={(e) => setAttendanceDate(e.target.value)}
+                className="px-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-zinc-300 focus:outline-none focus:border-orange-500 font-mono"
+              />
+
+              {/* Open Camera Scanner Button */}
+              <button
+                onClick={() => setShowScannerModal(true)}
+                className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-md transition"
+              >
+                <Camera className="w-4 h-4" />
+                <span>Scan QR</span>
+              </button>
+
+              {/* Bulk Mark All Present Button */}
+              {canManage && (
+                <button
+                  onClick={handleBulkMarkPresent}
+                  className="px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-semibold text-xs flex items-center gap-1.5 border border-zinc-700 transition"
+                  title="Mark all batch students as Present"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Mark All Present</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Success Banner */}
+          {attendanceNotice && (
+            <div className="p-3.5 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-xs text-emerald-300 flex items-center gap-2.5 animate-in fade-in">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="font-semibold">{attendanceNotice}</span>
+            </div>
+          )}
+
+          {/* Session Metrics Row */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-zinc-900/90 border border-emerald-500/30 rounded-3xl p-5 shadow-xl flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider font-mono">Present Today</span>
+                <div className="text-2xl font-black text-white mt-1">
+                  {attendanceMetrics ? attendanceMetrics.present_count : 4} / {attendanceMetrics ? attendanceMetrics.total_students : 6}
+                </div>
+                <span className="text-[11px] text-emerald-400 font-semibold mt-0.5 block">
+                  {attendanceMetrics ? attendanceMetrics.attendance_rate : 83.3}% Attendance Rate
+                </span>
+              </div>
+              <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xl border border-emerald-500/30">
+                ✓
+              </div>
+            </div>
+
+            <div className="bg-zinc-900/90 border border-amber-500/30 rounded-3xl p-5 shadow-xl flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider font-mono">Late Arrivals</span>
+                <div className="text-2xl font-black text-amber-400 mt-1">
+                  {attendanceMetrics ? attendanceMetrics.late_count : 1}
+                </div>
+                <span className="text-[11px] text-amber-400 font-semibold mt-0.5 block">
+                  Checked in after start time
+                </span>
+              </div>
+              <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-xl border border-amber-500/30">
+                ⏱️
+              </div>
+            </div>
+
+            <div className="bg-zinc-900/90 border border-rose-500/30 rounded-3xl p-5 shadow-xl flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider font-mono">Absent Students</span>
+                <div className="text-2xl font-black text-rose-400 mt-1">
+                  {attendanceMetrics ? attendanceMetrics.absent_count : 0}
+                </div>
+                <span className="text-[11px] text-rose-400 font-semibold mt-0.5 block">
+                  Unexcused absence
+                </span>
+              </div>
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold text-xl border border-rose-500/30">
+                ✗
+              </div>
+            </div>
+
+            <div className="bg-zinc-900/90 border border-blue-500/30 rounded-3xl p-5 shadow-xl flex items-center justify-between">
+              <div>
+                <span className="text-[11px] font-bold text-blue-400 uppercase tracking-wider font-mono">Excused Leaves</span>
+                <div className="text-2xl font-black text-blue-400 mt-1">
+                  {attendanceMetrics ? attendanceMetrics.excused_count : 1}
+                </div>
+                <span className="text-[11px] text-blue-400 font-semibold mt-0.5 block">
+                  Prior parent notice
+                </span>
+              </div>
+              <div className="w-12 h-12 rounded-2xl bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold text-xl border border-blue-500/30">
+                ℹ️
+              </div>
+            </div>
+          </div>
+
+          {/* Interactive Attendance Sheet Table */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-5 shadow-xl space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-zinc-800">
+              <div>
+                <h4 className="text-sm font-black text-white">Batch Roster Attendance Sheet</h4>
+                <p className="text-xs text-zinc-400">Click any status pill to toggle student attendance or scan QR code</p>
+              </div>
+
+              <div className="text-xs text-zinc-400 font-mono">
+                Date: <strong className="text-white">{attendanceDate}</strong>
+              </div>
+            </div>
+
+            {isAttendanceLoading ? (
+              <div className="py-16 text-center text-xs font-mono text-zinc-500">
+                Loading attendance records...
+              </div>
+            ) : attendanceStudents.length === 0 ? (
+              <div className="py-16 text-center text-xs text-zinc-500">
+                No students found in this batch.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-zinc-800 text-[11px] font-mono uppercase tracking-wider text-zinc-400">
+                      <th className="py-3 px-3">Student & Roll No</th>
+                      <th className="py-3 px-3">Status</th>
+                      <th className="py-3 px-3">Check-In Time</th>
+                      <th className="py-3 px-3">Method</th>
+                      <th className="py-3 px-3">Quick Mark</th>
+                      <th className="py-3 px-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800/60">
+                    {attendanceStudents.map((st) => {
+                      const isPresent = st.status === 'present';
+                      const isLate = st.status === 'late';
+                      const isAbsent = st.status === 'absent';
+                      const isExcused = st.status === 'excused';
+
+                      return (
+                        <tr key={st.student_id} className="hover:bg-zinc-950/40 transition group">
+                          {/* Student & Roll */}
+                          <td className="py-3.5 px-3">
+                            <div className="flex items-center gap-2.5">
+                              <span className="text-xl">{st.avatar_emoji || '👦'}</span>
+                              <div>
+                                <div className="font-bold text-white group-hover:text-orange-400 transition">
+                                  {st.name}
+                                </div>
+                                <div className="text-[10px] text-zinc-400 font-mono">
+                                  Elo: {st.rating || 1400} • Roll: CHESS-{st.student_id.slice(-4).toUpperCase()}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Status Badge */}
+                          <td className="py-3.5 px-3">
+                            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold capitalize border ${
+                              isPresent
+                                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                                : isLate
+                                ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                                : isExcused
+                                ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                                : isAbsent
+                                ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                                : 'bg-zinc-800 text-zinc-400 border-zinc-700'
+                            }`}>
+                              {isPresent && <CheckCircle2 className="w-3 h-3" />}
+                              {isLate && <Clock className="w-3 h-3" />}
+                              {isAbsent && <AlertCircle className="w-3 h-3" />}
+                              {isExcused && <Shield className="w-3 h-3" />}
+                              {st.status || 'Not Marked'}
+                            </span>
+                          </td>
+
+                          {/* Check-in Time */}
+                          <td className="py-3.5 px-3">
+                            <span className="font-mono text-[11px] text-zinc-300">
+                              {st.checkin_time ? st.checkin_time.slice(0, 5) : '—'}
+                            </span>
+                          </td>
+
+                          {/* Method */}
+                          <td className="py-3.5 px-3">
+                            <span className="text-[10px] font-mono text-zinc-400 capitalize flex items-center gap-1">
+                              {st.method === 'qr_scan' ? (
+                                <>
+                                  <QrCode className="w-3 h-3 text-orange-400" />
+                                  <span>QR Scan</span>
+                                </>
+                              ) : st.method === 'manual' ? (
+                                <>
+                                  <UserCheck className="w-3 h-3 text-zinc-400" />
+                                  <span>Manual</span>
+                                </>
+                              ) : (
+                                <span>—</span>
+                              )}
+                            </span>
+                          </td>
+
+                          {/* Quick Mark Buttons */}
+                          <td className="py-3.5 px-3">
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => handleStudentStatusChange(st.student_id, 'present')}
+                                className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                                  isPresent
+                                    ? 'bg-emerald-500 text-white shadow-sm'
+                                    : 'bg-zinc-800/80 text-zinc-400 hover:text-emerald-300 hover:bg-zinc-800'
+                                }`}
+                                title="Mark Present"
+                              >
+                                Present
+                              </button>
+                              <button
+                                onClick={() => handleStudentStatusChange(st.student_id, 'late')}
+                                className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                                  isLate
+                                    ? 'bg-amber-500 text-white shadow-sm'
+                                    : 'bg-zinc-800/80 text-zinc-400 hover:text-amber-300 hover:bg-zinc-800'
+                                }`}
+                                title="Mark Late"
+                              >
+                                Late
+                              </button>
+                              <button
+                                onClick={() => handleStudentStatusChange(st.student_id, 'absent')}
+                                className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                                  isAbsent
+                                    ? 'bg-rose-600 text-white shadow-sm'
+                                    : 'bg-zinc-800/80 text-zinc-400 hover:text-rose-300 hover:bg-zinc-800'
+                                }`}
+                                title="Mark Absent"
+                              >
+                                Absent
+                              </button>
+                              <button
+                                onClick={() => handleStudentStatusChange(st.student_id, 'excused')}
+                                className={`px-2 py-1 rounded-lg text-[10px] font-bold transition ${
+                                  isExcused
+                                    ? 'bg-blue-600 text-white shadow-sm'
+                                    : 'bg-zinc-800/80 text-zinc-400 hover:text-blue-300 hover:bg-zinc-800'
+                                }`}
+                                title="Mark Excused"
+                              >
+                                Excused
+                              </button>
+                            </div>
+                          </td>
+
+                          {/* Actions */}
+                          <td className="py-3.5 px-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {/* Digital ID Badge Pass */}
+                              <button
+                                onClick={() => setIdCardStudent(st)}
+                                className="px-2.5 py-1 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold text-[11px] flex items-center gap-1 transition border border-zinc-700 hover:border-orange-500/50"
+                                title="View & Print Digital Student ID Pass"
+                              >
+                                <QrCode className="w-3 h-3 text-orange-400" />
+                                <span>ID Pass</span>
+                              </button>
+
+                              {/* 1-Click WhatsApp Parent Check-in Notification */}
+                              <button
+                                onClick={() => handleSendAttendanceWhatsApp(st)}
+                                className="p-1.5 rounded-xl bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition border border-emerald-500/30"
+                                title="Send Check-In Alert to Parent via WhatsApp"
                               >
                                 <MessageCircle className="w-3.5 h-3.5" />
                               </button>
@@ -1809,6 +2238,25 @@ _Sent via Chess Play Academy Platform_`;
         <FeeInvoiceModal
           fee={selectedFeeForInvoice}
           onClose={() => setSelectedFeeForInvoice(null)}
+        />
+      )}
+
+      {/* Attendance Camera QR Scanner Modal */}
+      {showScannerModal && (
+        <AttendanceScannerModal
+          batchId={attendanceBatchId}
+          batchName={batches.find(b => b.id === attendanceBatchId)?.name || 'Batch Alpha'}
+          students={attendanceStudents}
+          onClose={() => setShowScannerModal(false)}
+          onCheckInSuccess={loadAttendanceData}
+        />
+      )}
+
+      {/* Digital Student ID Badge Modal */}
+      {idCardStudent && (
+        <StudentIDCardModal
+          student={idCardStudent}
+          onClose={() => setIdCardStudent(null)}
         />
       )}
     </div>

@@ -678,9 +678,47 @@ if ($action === 'seed_auth' || $action === 'migrate') {
             'cash', 'REC-CASH-081', 'paid', 'Cash deposited at academy desk receipt #81'
         ]);
 
+        // 8. Student QR Attendance & Session Check-In Ledger Schema
+        $pdo->exec("
+        CREATE TABLE IF NOT EXISTS attendance_records (
+            id VARCHAR(36) PRIMARY KEY,
+            academy_id VARCHAR(36) NOT NULL,
+            batch_id VARCHAR(36) NOT NULL,
+            student_id VARCHAR(36) NOT NULL,
+            session_date DATE NOT NULL,
+            checkin_time TIME NULL,
+            status ENUM('present', 'absent', 'late', 'excused') DEFAULT 'present',
+            method ENUM('qr_scan', 'manual', 'kiosk') DEFAULT 'qr_scan',
+            marked_by VARCHAR(36) NOT NULL,
+            notes TEXT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uk_student_session (student_id, session_date, batch_id),
+            INDEX idx_att_date (session_date, batch_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        ");
+
+        $todayDate = date('Y-m-d');
+        $attStmt = $pdo->prepare("
+            INSERT INTO attendance_records (id, academy_id, batch_id, student_id, session_date, checkin_time, status, method, marked_by, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE 
+                checkin_time = VALUES(checkin_time),
+                status = VALUES(status),
+                method = VALUES(method),
+                notes = VALUES(notes);
+        ");
+
+        $attStmt->execute(['att-01', 'acad-001', 'batch-01', 'st-1', $todayDate, '18:02:14', 'present', 'qr_scan', 'usr-headcoach', 'Digital QR scanned at door entrance']);
+        $attStmt->execute(['att-02', 'acad-001', 'batch-01', 'st-2', $todayDate, '18:04:30', 'present', 'qr_scan', 'usr-headcoach', 'Digital QR scanned at door entrance']);
+        $attStmt->execute(['att-03', 'acad-001', 'batch-01', 'st-3', $todayDate, '17:58:10', 'present', 'qr_scan', 'usr-headcoach', 'Early arrival, set up board 1']);
+        $attStmt->execute(['att-04', 'acad-001', 'batch-01', 'st-4', $todayDate, NULL, 'excused', 'manual', 'usr-headcoach', 'Parent notified: School quarterly exams']);
+        $attStmt->execute(['att-05', 'acad-001', 'batch-01', 'st-5', $todayDate, '18:18:45', 'late', 'qr_scan', 'usr-headcoach', 'Arrived 18 mins late due to rain traffic']);
+        $attStmt->execute(['att-06', 'acad-001', 'batch-01', 'st-6', $todayDate, '18:01:05', 'present', 'qr_scan', 'usr-headcoach', 'Digital QR scanned at door entrance']);
+
         echo json_encode([
             'status' => 'success',
-            'message' => "Successfully seeded {$seededCount} secured user accounts, classroom simul boards, homework curricula, student performance reports, and fee billing ledger",
+            'message' => "Successfully seeded {$seededCount} secured user accounts, classroom simul boards, homework curricula, student performance reports, fee billing, and QR attendance ledger",
             'demo_accounts' => array_map(function($u) {
                 return ['email' => $u['email'], 'role' => $u['role'], 'name' => $u['name']];
             }, $demoUsers)
