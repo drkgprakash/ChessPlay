@@ -301,7 +301,7 @@ if ($action === 'seed_auth' || $action === 'migrate') {
         // Seed 6 Student Boards for Batch Alpha Simul Grid
         $students = [
             ['sb-1', 'session-01', 'st-1', 'Aarav Sharma', '👦', 'r1bqkb1r/pppp1ppp/2n5/4p3/2B1n3/5Q2/PPPP1PPP/RNB1K1NR w KQkq - 0 5', 'Qf3', '+1.4', 'active', 0],
-            ['sb-2', 'session-01', 'st-2', 'Diya Patel', '👧', '6k1/5ppp/8/8/8/5Q2/4NPPP/2r3K1 w - - 0 1', 'cxd4', '-0.8', 'blunder', 1],
+            ['sb-2', 'session-01', 'st-2', 'Diya Patel', '👧', '6k1/5ppp/8/8/8/5Q2/4NPPP/2r3K1 w - - 0 1', 'cxd4', '-0.8', 'blunder', 0],
             ['sb-3', 'session-01', 'st-3', 'Rohan Iyer', '🧑', 'r3k2r/pppq1ppp/3p1n2/4p3/1b2P3/2NP1N2/PPP2PPP/R1BQK2R w KQkq - 0 8', 'Nf6', '+2.1', 'active', 0],
             ['sb-4', 'session-01', 'st-4', 'Ananya Gupta', '👧', 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1', 'e4', '0.0', 'waiting', 0],
             ['sb-5', 'session-01', 'st-5', 'Kabir Verma', '👦', 'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2', 'Nf3', '+3.6', 'active', 0],

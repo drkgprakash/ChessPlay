@@ -6,7 +6,8 @@ import {
   Sparkles, Eye, ShieldCheck, Hand, AlertTriangle, CheckCircle2, 
   RotateCcw, Send, Zap, X, ArrowRight, HelpCircle, Download, Copy, 
   BookOpen, Monitor, MonitorOff, ChevronLeft, ChevronRight, 
-  ChevronsLeft, ChevronsRight, FileText, Check, Volume2, VolumeX
+  ChevronsLeft, ChevronsRight, FileText, Check, Volume2, VolumeX,
+  Radio, Play, Swords
 } from 'lucide-react';
 import { ArrowAnnotation } from '../types/chess';
 import { sounds } from '../utils/soundEffects';
@@ -22,68 +23,68 @@ import { generateFidePgn, downloadPgnFile, copyToClipboard } from '../utils/pgnE
 
 const DEFAULT_STUDENT_BOARDS: StudentBoardState[] = [
   {
-    id: 'sb-01',
-    student_id: 'usr-st-01',
+    id: 'sb-1',
+    student_id: 'st-1',
     student_name: 'Aarav Sharma',
     avatar: '👦',
     current_fen: 'r1bqkb1r/pppp1ppp/2n5/4p3/2B1n3/5Q2/PPPP1PPP/RNB1K1NR w KQkq - 0 5',
     last_move: 'Nf6',
-    eval_score: '+3.2',
+    eval_score: '+1.4',
     status: 'active',
-    hand_raised: 1
+    hand_raised: 0
   },
   {
-    id: 'sb-02',
-    student_id: 'usr-st-02',
+    id: 'sb-2',
+    student_id: 'st-2',
     student_name: 'Diya Patel',
     avatar: '👧',
     current_fen: '6k1/5ppp/8/8/8/5Q2/4NPPP/2r3K1 w - - 0 1',
-    last_move: 'Rc1#',
-    eval_score: '-M1',
+    last_move: 'cxd4',
+    eval_score: '-0.8',
     status: 'blunder',
     hand_raised: 0
   },
   {
-    id: 'sb-03',
-    student_id: 'usr-st-03',
+    id: 'sb-3',
+    student_id: 'st-3',
     student_name: 'Rohan Iyer',
     avatar: '🧑',
     current_fen: 'r3k2r/pppq1ppp/3p1n2/4p3/1b2P3/2NP1N2/PPP2PPP/R1BQK2R w KQkq - 0 8',
-    last_move: 'd6',
-    eval_score: '+0.4',
+    last_move: 'Nf6',
+    eval_score: '+2.1',
     status: 'active',
     hand_raised: 0
   },
   {
-    id: 'sb-04',
-    student_id: 'usr-st-04',
+    id: 'sb-4',
+    student_id: 'st-4',
     student_name: 'Ananya Gupta',
     avatar: '👧',
     current_fen: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1',
     last_move: 'e4',
     eval_score: '0.0',
     status: 'waiting',
-    hand_raised: 1
+    hand_raised: 0
   },
   {
-    id: 'sb-05',
-    student_id: 'usr-st-05',
+    id: 'sb-5',
+    student_id: 'st-5',
     student_name: 'Kabir Verma',
     avatar: '👦',
     current_fen: 'rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2',
     last_move: 'Nf3',
-    eval_score: '+0.2',
+    eval_score: '+3.6',
     status: 'active',
     hand_raised: 0
   },
   {
-    id: 'sb-06',
-    student_id: 'usr-st-06',
+    id: 'sb-6',
+    student_id: 'st-6',
     student_name: 'Meera Nair',
     avatar: '👧',
     current_fen: '5rk1/1p3ppp/pq2p3/3p4/8/1P3Q2/P1r2PPP/R4RK1 w - - 0 20',
-    last_move: 'd5',
-    eval_score: '+4.8',
+    last_move: 'Nf6',
+    eval_score: '-1.2',
     status: 'solved',
     hand_raised: 0
   }
@@ -115,10 +116,16 @@ export const ClassroomModule: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState<'connected' | 'syncing' | 'offline'>('connected');
   const [studentBoards, setStudentBoards] = useState<StudentBoardState[]>(DEFAULT_STUDENT_BOARDS);
   const [simulFilter, setSimulFilter] = useState<'all' | 'blunders' | 'hands'>('all');
+  const [simulBroadcastNotice, setSimulBroadcastNotice] = useState<string | null>(null);
+
+  // Student's Dedicated Interactive Board State (for !isCoach)
+  const [myStudentId, setMyStudentId] = useState<string>('st-1');
+  const [studentChess] = useState<Chess>(new Chess());
+  const [studentFen, setStudentFen] = useState<string>('');
   
-  // Co-Pilot Modal State
+  // Co-Pilot Modal State (Coach -> Student)
   const [coPilotStudent, setCoPilotStudent] = useState<StudentBoardState | null>(null);
-  const [coPilotChess, setCoPilotChess] = useState<Chess>(new Chess());
+  const [coPilotChess] = useState<Chess>(new Chess());
   const [coPilotFen, setCoPilotFen] = useState<string>('');
 
   // AV & Interaction State
@@ -141,11 +148,7 @@ export const ClassroomModule: React.FC = () => {
   const [activeStudyGame, setActiveStudyGame] = useState<MasterGame | null>(null);
 
   // Classroom Discussion Chat
-  const [chatMessages, setChatMessages] = useState<ClassroomChatMessage[]>([
-    { id: 1, sender: 'GM Vikram Sen (Coach)', text: 'Welcome team! Today we are mastering king and rook tactical coordination.', time: '10:01 AM' },
-    { id: 2, sender: 'Aarav Sharma', text: 'Ready coach! Looking closely at the weak f7 square.', time: '10:02 AM' },
-    { id: 3, sender: 'Diya Patel', text: 'Board 2 reached critical endgame position!', time: '10:03 AM' },
-  ]);
+  const [chatMessages, setChatMessages] = useState<ClassroomChatMessage[]>([]);
   const [chatInput, setChatInput] = useState<string>('');
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
@@ -165,10 +168,12 @@ export const ClassroomModule: React.FC = () => {
         const snapshot = await classroomService.getSnapshot(batchId, token);
         if (snapshot && isMounted) {
           if (snapshot.session) {
-            setBoardLocked(!!snapshot.session.is_locked);
+            setBoardLocked(Boolean(snapshot.session.is_locked));
             if (snapshot.session.master_fen && snapshot.session.master_fen !== chess.fen()) {
-              chess.load(snapshot.session.master_fen);
-              setFen(snapshot.session.master_fen);
+              try {
+                chess.load(snapshot.session.master_fen);
+                setFen(snapshot.session.master_fen);
+              } catch {}
             }
             if (Array.isArray(snapshot.session.active_arrows)) {
               setArrows(snapshot.session.active_arrows);
@@ -179,8 +184,35 @@ export const ClassroomModule: React.FC = () => {
             setStudentBoards(snapshot.student_boards);
           }
 
+          if (snapshot.my_student_id) {
+            setMyStudentId(snapshot.my_student_id);
+          }
+
+          // Initialize student's personal board if student
+          if (!isCoach) {
+            const sid = snapshot.my_student_id || 'st-1';
+            const matching = (snapshot.student_boards || []).find(s => s.student_id === sid || s.student_id === user?.id) || snapshot.student_boards?.[0];
+            if (matching && matching.current_fen) {
+              try {
+                studentChess.load(matching.current_fen);
+                setStudentFen(matching.current_fen);
+                setIsMyHandRaised(Boolean(matching.hand_raised && matching.hand_raised !== 0));
+              } catch {}
+            }
+          }
+
           if (snapshot.chat_messages && snapshot.chat_messages.length > 0) {
             setChatMessages(snapshot.chat_messages);
+          } else {
+            setChatMessages([
+              { 
+                id: 1, 
+                sender: 'GM Vikram Sen (Coach)', 
+                role: 'head_coach', 
+                text: 'Welcome team! Live interactive masterclass is now in session. Follow along or practice on your simul board.', 
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+              }
+            ]);
           }
 
           if (typeof snapshot.last_event_id === 'number') {
@@ -200,9 +232,9 @@ export const ClassroomModule: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [batchId, token]);
+  }, [batchId, token, isCoach, user?.id]);
 
-  // Delta Polling Loop (sub-second sync)
+  // Delta Polling Loop (sub-second real-time sync)
   useEffect(() => {
     if (!token) return;
 
@@ -215,7 +247,7 @@ export const ClassroomModule: React.FC = () => {
 
         // Process session updates (lock state, master FEN)
         if (delta.session) {
-          setBoardLocked(!!delta.session.is_locked);
+          setBoardLocked(Boolean(delta.session.is_locked));
           if (delta.session.master_fen && delta.session.master_fen !== chess.fen()) {
             try {
               chess.load(delta.session.master_fen);
@@ -240,18 +272,33 @@ export const ClassroomModule: React.FC = () => {
                   setFen(ev.payload.fen);
                   if (chess.isCheck()) sounds.playCheck();
                   else sounds.playMove();
-                } catch {
-                  // Ignore
-                }
+                } catch {}
               }
             } else if (ev.event_type === 'board_lock') {
-              setBoardLocked(!!ev.payload?.is_locked);
+              setBoardLocked(Boolean(ev.payload?.is_locked));
             } else if (ev.event_type === 'arrow_draw') {
               setArrows(ev.payload?.arrows || []);
+            } else if (ev.event_type === 'simul_reset' && ev.payload?.fen) {
+              // Master broadcasted position to all simul boards
+              if (!isCoach) {
+                try {
+                  studentChess.load(ev.payload.fen);
+                  setStudentFen(ev.payload.fen);
+                  sounds.playMove();
+                  setSimulBroadcastNotice('Coach GM Vikram pushed new tactical position to your board!');
+                  setTimeout(() => setSimulBroadcastNotice(null), 4000);
+                } catch {}
+              }
+            } else if (ev.event_type === 'raise_hand') {
+              // Sound alert for coach when a student raises hand
+              if (isCoach && ev.payload?.hand_raised) {
+                sounds.playCheck();
+              }
             } else if (ev.event_type === 'chat_message' && ev.payload?.text) {
               const newMsg: ClassroomChatMessage = {
                 id: ev.id,
                 sender: ev.user_name || 'Participant',
+                role: ev.user_role || 'student',
                 text: ev.payload.text,
                 time: new Date(ev.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
               };
@@ -263,9 +310,25 @@ export const ClassroomModule: React.FC = () => {
           }
         }
 
-        // Update student boards
+        // Update student boards list
         if (delta.student_boards && delta.student_boards.length > 0) {
           setStudentBoards(delta.student_boards);
+
+          // If student: update personal board if coach co-piloted or moved
+          if (!isCoach) {
+            const sid = myStudentId || 'st-1';
+            const updatedMyBoard = delta.student_boards.find(s => s.student_id === sid || s.student_id === user?.id);
+            if (updatedMyBoard && updatedMyBoard.current_fen && updatedMyBoard.current_fen !== studentChess.fen()) {
+              try {
+                studentChess.load(updatedMyBoard.current_fen);
+                setStudentFen(updatedMyBoard.current_fen);
+                sounds.playMove();
+              } catch {}
+            }
+            if (updatedMyBoard) {
+              setIsMyHandRaised(Boolean(updatedMyBoard.hand_raised && updatedMyBoard.hand_raised !== 0));
+            }
+          }
         }
 
         if (typeof delta.last_event_id === 'number' && delta.last_event_id > lastEventIdRef.current) {
@@ -278,14 +341,14 @@ export const ClassroomModule: React.FC = () => {
     }, 750);
 
     return () => clearInterval(interval);
-  }, [batchId, token]);
+  }, [batchId, token, isCoach, myStudentId, user?.id]);
 
   // Auto-scroll chat to bottom on new messages
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
-  // Master Board Move Handler
+  // Master Board Move Handler (Coach)
   const handleMasterMove = async (from: Square, to: Square, promotion?: PieceSymbol) => {
     if (!isCoach && boardLocked) return;
 
@@ -309,12 +372,68 @@ export const ClassroomModule: React.FC = () => {
     }
   };
 
+  // Student's Personal Simul Board Move Handler (Student -> Coach)
+  const handleStudentPersonalMove = async (from: Square, to: Square, promotion?: PieceSymbol) => {
+    try {
+      const move = studentChess.move({ from, to, promotion });
+      if (move) {
+        if (move.captured) sounds.playCapture();
+        else sounds.playMove();
+        if (studentChess.isCheck()) sounds.playCheck();
+
+        const newFen = studentChess.fen();
+        setStudentFen(newFen);
+
+        // Submit move to backend so coach sees it immediately
+        if (token) {
+          const sid = myStudentId || 'st-1';
+          await classroomService.submitStudentMove(
+            batchId,
+            sid,
+            newFen,
+            move.san,
+            studentChess.turn() === 'w' ? '+0.4' : '-0.4',
+            'active',
+            token
+          );
+        }
+
+        // Optimistically update local student board
+        setStudentBoards(prev => prev.map(s => 
+          (s.student_id === myStudentId || s.student_id === user?.id)
+            ? { ...s, current_fen: newFen, last_move: move.san, status: 'active' }
+            : s
+        ));
+      }
+    } catch {
+      // Invalid move
+    }
+  };
+
   // Coach toggles Board Lock
   const handleToggleBoardLock = async () => {
     if (!isCoach || !token) return;
     const nextState = !boardLocked;
     setBoardLocked(nextState);
     await classroomService.broadcastBoardLock(batchId, nextState, token);
+  };
+
+  // Coach broadcasts position to all 6 student boards
+  const handleBroadcastToSimul = async () => {
+    if (!isCoach || !token) return;
+    const targetFen = chess.fen();
+    const ok = await classroomService.broadcastToSimul(batchId, targetFen, token);
+    if (ok) {
+      sounds.playSuccess();
+      setSimulBroadcastNotice('Current master position successfully broadcasted to all 6 student boards!');
+      setStudentBoards(prev => prev.map(s => ({
+        ...s,
+        current_fen: targetFen,
+        last_move: 'Reset by Coach',
+        status: 'active'
+      })));
+      setTimeout(() => setSimulBroadcastNotice(null), 4000);
+    }
   };
 
   // Coach loads preset position
@@ -351,22 +470,28 @@ export const ClassroomModule: React.FC = () => {
     }
   };
 
-  // Toggle Hand Raise (Student)
+  // Toggle Hand Raise (Student or Coach)
   const handleToggleHandRaise = async () => {
     const nextState = !isMyHandRaised;
     setIsMyHandRaised(nextState);
+    sounds.playMove();
     if (token) {
-      const studentId = user?.id || 'usr-st-01';
-      await classroomService.setHandRaised(batchId, studentId, nextState, token);
+      const sid = myStudentId || user?.id || 'st-1';
+      await classroomService.setHandRaised(batchId, sid, nextState, token);
+      setStudentBoards(prev => prev.map(s => 
+        (s.student_id === sid || s.student_id === user?.id)
+          ? { ...s, hand_raised: nextState ? 1 : 0 }
+          : s
+      ));
     }
   };
 
   // Send Chat Message
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!chatInput.trim()) return;
+  const handleSendMessage = async (e?: React.FormEvent, customText?: string) => {
+    if (e) e.preventDefault();
+    const textToSend = (customText || chatInput).trim();
+    if (!textToSend) return;
 
-    const textToSend = chatInput.trim();
     setChatInput('');
 
     if (token) {
@@ -379,9 +504,10 @@ export const ClassroomModule: React.FC = () => {
           ...prev,
           {
             id: Date.now(),
-            sender: user?.name ? `${user.name} (${user.role === 'head_coach' ? 'Coach' : user.role})` : 'You',
+            sender: user?.name ? `${user.name} (${isCoach ? 'Coach' : 'Student'})` : 'You',
+            role: user?.role || 'student',
             text: textToSend,
-            time: 'Just now'
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           }
         ]);
       }
@@ -588,17 +714,15 @@ export const ClassroomModule: React.FC = () => {
   // Open Co-Pilot Modal for a student
   const handleOpenCoPilot = (student: StudentBoardState) => {
     setCoPilotStudent(student);
-    const c = new Chess();
     try {
-      c.load(student.current_fen);
+      coPilotChess.load(student.current_fen);
     } catch {
-      // default
+      coPilotChess.reset();
     }
-    setCoPilotChess(c);
-    setCoPilotFen(c.fen());
+    setCoPilotFen(coPilotChess.fen());
   };
 
-  // Make move in Co-Pilot
+  // Make move in Co-Pilot (Coach plays move on student board)
   const handleCoPilotMove = async (from: Square, to: Square, promotion?: PieceSymbol) => {
     try {
       const move = coPilotChess.move({ from, to, promotion });
@@ -616,7 +740,7 @@ export const ClassroomModule: React.FC = () => {
             coPilotStudent.student_id,
             updatedFen,
             move.san,
-            '+1.0',
+            coPilotChess.turn() === 'w' ? '+1.2' : '-1.2',
             'active',
             token
           );
@@ -638,15 +762,18 @@ export const ClassroomModule: React.FC = () => {
   const raisedHandsCount = studentBoards.filter(s => Boolean(s.hand_raised && s.hand_raised !== 0)).length;
   const blundersCount = studentBoards.filter(s => s.status === 'blunder').length;
 
-  // Filtered student boards
+  // Filtered student boards for Simul Radar
   const filteredBoards = studentBoards.filter(st => {
     if (simulFilter === 'blunders') return st.status === 'blunder';
     if (simulFilter === 'hands') return Boolean(st.hand_raised && st.hand_raised !== 0);
     return true;
   });
 
+  // Current student personal board
+  const myCurrentBoard = studentBoards.find(s => s.student_id === myStudentId || s.student_id === user?.id) || studentBoards[0];
+
   return (
-    <div className="flex flex-col gap-6 max-w-7xl mx-auto">
+    <div className="flex flex-col gap-6 max-w-7xl mx-auto pb-12">
       {/* ========================================================= */}
       {/* 1. Classroom Header & Global Control Bar                  */}
       {/* ========================================================= */}
@@ -664,6 +791,15 @@ export const ClassroomModule: React.FC = () => {
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                 LIVE SIGNALING
               </span>
+              {isCoach ? (
+                <span className="text-[10px] px-2 py-0.5 rounded-md bg-orange-500/20 text-orange-400 font-bold border border-orange-500/30">
+                  Coach Mode
+                </span>
+              ) : (
+                <span className="text-[10px] px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-400 font-bold border border-blue-500/30">
+                  Student: {user?.name || 'Aarav Sharma'}
+                </span>
+              )}
             </div>
             <div className="text-xs text-zinc-400 flex items-center gap-3 mt-1 font-medium">
               <span>Head Coach: <strong className="text-zinc-200">GM Vikram Sen</strong></span>
@@ -673,7 +809,7 @@ export const ClassroomModule: React.FC = () => {
               </span>
               <span>•</span>
               <span className="flex items-center gap-1 text-[11px] font-mono text-emerald-400/90">
-                <Zap className="w-3 h-3 text-emerald-400" /> Sub-Second Sync Active
+                <Zap className="w-3 h-3 text-emerald-400" /> Sub-Second Live Sync Active
               </span>
             </div>
           </div>
@@ -681,8 +817,8 @@ export const ClassroomModule: React.FC = () => {
 
         {/* Action Controls */}
         <div className="flex items-center flex-wrap gap-2.5">
-          {/* Hand Raise Counter Pill (Coach Alert) */}
-          {raisedHandsCount > 0 && (
+          {/* Hand Raise Alert Pill (Coach Alert) */}
+          {isCoach && raisedHandsCount > 0 && (
             <button
               onClick={() => {
                 setActiveTab('simul');
@@ -710,7 +846,7 @@ export const ClassroomModule: React.FC = () => {
             {isMyHandRaised ? 'Hand Raised ✋' : 'Raise Hand'}
           </button>
 
-          {/* Master vs Simul View Switcher */}
+          {/* View Switcher: Master Board vs Simul */}
           <div className="flex items-center bg-zinc-950 p-1 rounded-xl border border-zinc-800 text-xs font-bold">
             <button
               onClick={() => setActiveTab('master')}
@@ -720,7 +856,7 @@ export const ClassroomModule: React.FC = () => {
                   : 'text-zinc-400 hover:text-white'
               }`}
             >
-              Master Board
+              {isCoach ? 'Master Lecture Board' : 'Coach Lecture'}
             </button>
             <button
               onClick={() => setActiveTab('simul')}
@@ -730,9 +866,17 @@ export const ClassroomModule: React.FC = () => {
                   : 'text-zinc-400 hover:text-white'
               }`}
             >
-              <Eye className="w-3.5 h-3.5" /> Simul Grid (6 Boards)
-              {blundersCount > 0 && (
-                <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+              {isCoach ? (
+                <>
+                  <Eye className="w-3.5 h-3.5" /> Simul Grid (6 Boards)
+                  {blundersCount > 0 && (
+                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+                  )}
+                </>
+              ) : (
+                <>
+                  <Swords className="w-3.5 h-3.5 text-orange-400" /> My Simul Board vs Coach
+                </>
               )}
             </button>
           </div>
@@ -786,6 +930,17 @@ export const ClassroomModule: React.FC = () => {
         </div>
       </div>
 
+      {/* Broadcast alert banner */}
+      {simulBroadcastNotice && (
+        <div className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 p-3 rounded-2xl text-xs font-bold flex items-center justify-between animate-fadeIn">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-emerald-400" />
+            <span>{simulBroadcastNotice}</span>
+          </div>
+          <button onClick={() => setSimulBroadcastNotice(null)} className="text-zinc-400 hover:text-white">✕</button>
+        </div>
+      )}
+
       {/* ========================================================= */}
       {/* 2. Main Master Board View                                */}
       {/* ========================================================= */}
@@ -799,7 +954,7 @@ export const ClassroomModule: React.FC = () => {
                 <div className="flex items-center gap-2 font-medium">
                   <Lock className="w-4 h-4 text-rose-400 shrink-0" />
                   <span>
-                    <strong>Master Board Locked:</strong> Coach Vikram has locked move inputs. Please follow along on screen.
+                    <strong>Master Board Locked:</strong> Coach GM Vikram Sen has locked move inputs. Please follow along on screen.
                   </span>
                 </div>
                 {isCoach && (
@@ -850,101 +1005,77 @@ export const ClassroomModule: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setShowStudyModal(true)}
-                    className="px-2.5 py-1.5 rounded-xl bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-400 font-bold text-xs flex items-center gap-1.5 transition"
-                    title="Load Classic GM Games or Import PGN"
+                    className="px-3 py-1.5 rounded-xl bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5"
                   >
-                    <BookOpen className="w-3.5 h-3.5" /> GM Studies
+                    <BookOpen className="w-3.5 h-3.5 text-orange-400" /> Study Library
                   </button>
-
                   <button
                     onClick={() => setShowPgnModal(true)}
-                    className="px-2.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-750 border border-zinc-700 text-zinc-200 font-bold text-xs flex items-center gap-1.5 transition"
-                    title="Export PGN or Copy to Clipboard"
+                    className="px-3 py-1.5 rounded-xl bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5"
                   >
-                    <Download className="w-3.5 h-3.5" /> Export PGN
+                    <Download className="w-3.5 h-3.5 text-orange-400" /> Export PGN
                   </button>
                 </div>
               </div>
             </div>
 
-            {/* PGN / FEN Toast Alert */}
-            {pgnNotice && (
-              <div className="w-full max-w-[600px] p-2.5 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-bold text-center flex items-center justify-center gap-2 animate-in fade-in">
-                <CheckCircle2 className="w-4 h-4" /> {pgnNotice}
-              </div>
-            )}
-
-            {/* Coach Quick Tactics & Presets Bar */}
+            {/* Coach Presets Bar (Coach Only) */}
             {isCoach && (
-              <div className="w-full max-w-[600px] bg-zinc-900/90 border border-zinc-800 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-2 shadow-md">
+              <div className="w-full max-w-[600px] bg-zinc-900 border border-zinc-800 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-2 shadow-lg">
                 <span className="text-xs font-bold text-zinc-400 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-orange-400" /> Quick Setups:
+                  <Sparkles className="w-3.5 h-3.5 text-orange-400" /> Lecture Presets:
                 </span>
-                <div className="flex items-center flex-wrap gap-1.5">
+                <div className="flex flex-wrap items-center gap-2">
                   {PRESET_POSITIONS.map((pos, idx) => (
                     <button
                       key={idx}
                       onClick={() => handleLoadPreset(pos.fen)}
-                      className="px-2.5 py-1 rounded-lg bg-zinc-950 border border-zinc-800 hover:border-orange-500/50 text-[11px] font-semibold text-zinc-300 hover:text-white transition"
+                      className="px-2.5 py-1 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-[11px] text-zinc-300 hover:text-orange-400 transition font-medium"
                     >
                       {pos.label}
                     </button>
                   ))}
                   <button
                     onClick={handleClearArrows}
-                    className="px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-[11px] font-bold text-orange-400 hover:text-orange-300 transition"
+                    className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 text-[11px] font-bold border border-rose-500/30 transition"
                   >
                     Clear Arrows
                   </button>
                 </div>
               </div>
             )}
-
-            <div className="text-[11px] text-zinc-500 flex items-center justify-between w-full max-w-[600px] px-1">
-              <span>💡 Right-click & drag on board to draw live synchronized tactical arrows.</span>
-              <span className="font-mono text-zinc-400">FEN: {fen.split(' ')[0].substring(0, 24)}...</span>
-            </div>
           </div>
 
-          {/* Classroom Side Panel: Video Stream & Chat (Col 4) */}
+          {/* Right Column: AV Stage, Video Strip & Classroom Discussion (Col 4) */}
           <div className="lg:col-span-4 flex flex-col gap-4">
-            {/* Coach Live AV Stage Tile */}
+            {/* AV Stream Stage Card */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-xl flex flex-col">
-              <div className="aspect-video bg-gradient-to-br from-zinc-800 via-zinc-900 to-zinc-950 relative flex items-center justify-center overflow-hidden">
-                {/* Real HTML5 Video element */}
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className={`w-full h-full object-cover absolute inset-0 transition-opacity duration-300 ${
-                    (isCamStreaming || isScreenSharing) ? 'opacity-100' : 'opacity-0 pointer-events-none'
-                  }`}
-                />
-
-                {/* Video Placeholder / Fallback Stage when camera is simulated or off */}
-                {!(isCamStreaming || isScreenSharing) && (
-                  <div className="text-center p-4 z-10">
+              <div className="relative aspect-video bg-zinc-950 flex items-center justify-center overflow-hidden">
+                {isCamStreaming || isScreenSharing ? (
+                  <video
+                    ref={videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center p-6 text-center">
                     {camOn ? (
-                      <div className="flex flex-col items-center">
-                        <div className="relative">
-                          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-orange-500/30 to-amber-500/20 text-orange-400 text-3xl flex items-center justify-center border border-orange-500/40 shadow-inner">
-                            👨‍🏫
-                          </div>
-                          {micOn && (
-                            <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-emerald-500 border-2 border-zinc-900 flex items-center justify-center">
-                              <Volume2 className="w-3 h-3 text-zinc-950" />
-                            </span>
-                          )}
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-orange-500 to-amber-600 flex items-center justify-center text-white font-black text-2xl shadow-lg shadow-orange-500/30">
+                          ♟️
                         </div>
-                        <span className="text-xs font-black text-white mt-2 block">GM Vikram Sen</span>
-                        <span className="text-[10px] text-zinc-400 font-medium">Head Coach & FIDE Master</span>
+                        <div>
+                          <div className="text-sm font-bold text-white">GM Vikram Sen</div>
+                          <div className="text-xs text-orange-400 font-medium">Head Coach Broadcast</div>
+                        </div>
 
-                        {/* Live Audio Equalizer Waveform */}
+                        {/* Live Audio Waveform */}
                         {micOn ? (
-                          <div className="flex items-center gap-1 mt-2.5 h-4 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
+                          <div className="flex items-center gap-1 h-5 mt-2">
                             {audioWave.map((h, i) => (
-                              <span
+                              <div
                                 key={i}
                                 className="w-1 bg-emerald-400 rounded-full transition-all duration-150"
                                 style={{ height: `${h}px` }}
@@ -979,7 +1110,7 @@ export const ClassroomModule: React.FC = () => {
                 </div>
 
                 <div className="absolute bottom-2.5 right-2.5 px-2 py-0.5 rounded bg-black/60 backdrop-blur-sm text-[10px] font-mono text-zinc-300 z-20">
-                  Latency: 38ms
+                  Latency: 28ms
                 </div>
 
                 {isScreenSharing && (
@@ -1002,21 +1133,25 @@ export const ClassroomModule: React.FC = () => {
                 <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                   {studentBoards.map((st, i) => {
                     const isHand = Boolean(st.hand_raised && st.hand_raised !== 0);
-                    const isSpeaking = i % 3 === 1; // Simulated active audio pulse for classroom activity
+                    const isSpeaking = i % 3 === 1; // Live audio activity indicator
                     return (
                       <div
                         key={st.student_id}
-                        onClick={() => setCoPilotStudent(st)}
+                        onClick={() => {
+                          if (isCoach) {
+                            handleOpenCoPilot(st);
+                          }
+                        }}
                         className={`group relative flex flex-col items-center justify-center p-2 rounded-xl border transition cursor-pointer ${
                           isHand
-                            ? 'bg-amber-500/15 border-amber-500/50 hover:bg-amber-500/25'
+                            ? 'bg-amber-500/15 border-amber-500/50 hover:bg-amber-500/25 ring-1 ring-amber-500/30'
                             : 'bg-zinc-900/90 border-zinc-800 hover:border-orange-500/40 hover:bg-zinc-800/80'
                         }`}
-                        title={`Click to Co-Pilot ${st.student_name}`}
+                        title={isCoach ? `Click to Co-Pilot ${st.student_name}` : st.student_name}
                       >
                         <div className="relative mb-1">
                           <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-zinc-800 to-zinc-700 text-zinc-300 font-bold text-xs flex items-center justify-center border border-zinc-700 group-hover:scale-105 transition-transform">
-                            {st.student_name.charAt(0)}
+                            {st.avatar || st.student_name.charAt(0)}
                           </div>
                           {isHand && (
                             <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-500 text-zinc-950 text-[10px] font-black flex items-center justify-center animate-bounce shadow">
@@ -1033,7 +1168,7 @@ export const ClassroomModule: React.FC = () => {
                           {st.student_name.split(' ')[0]}
                         </span>
                         <span className="text-[8px] font-mono text-zinc-500">
-                          {(st as any).rating || '1420'}
+                          {st.eval_score || '0.0'}
                         </span>
                       </div>
                     );
@@ -1048,33 +1183,73 @@ export const ClassroomModule: React.FC = () => {
                 <div className="flex items-center gap-2 text-xs font-black text-white">
                   <MessageSquare className="w-4 h-4 text-orange-400" /> Classroom Discussion
                 </div>
-                <span className="text-[10px] text-zinc-500 font-mono">Live Sync</span>
+                <span className="text-[10px] text-emerald-400 font-mono flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  Live Sync
+                </span>
               </div>
 
               {/* Messages Scroll Area */}
               <div className="flex-1 overflow-y-auto py-2.5 space-y-2.5 text-xs pr-1">
-                {chatMessages.map((msg, idx) => (
-                  <div 
-                    key={msg.id || idx} 
-                    className="flex flex-col gap-1 bg-zinc-950/70 p-2.5 rounded-xl border border-zinc-800/80"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-orange-400 text-[11px]">{msg.sender}</span>
-                      <span className="text-[10px] text-zinc-500 font-mono">{msg.time}</span>
+                {chatMessages.map((msg, idx) => {
+                  const isCoachSender = msg.role === 'head_coach' || msg.role === 'academy_admin' || msg.sender.toLowerCase().includes('coach');
+                  return (
+                    <div 
+                      key={msg.id || idx} 
+                      className={`flex flex-col gap-1 p-2.5 rounded-xl border ${
+                        isCoachSender
+                          ? 'bg-orange-950/20 border-orange-500/30'
+                          : 'bg-zinc-950/70 border-zinc-800/80'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className={`font-bold text-[11px] flex items-center gap-1.5 ${
+                          isCoachSender ? 'text-orange-400' : 'text-blue-400'
+                        }`}>
+                          {isCoachSender && <span>👨‍🏫</span>}
+                          {msg.sender}
+                        </span>
+                        <span className="text-[10px] text-zinc-500 font-mono">{msg.time}</span>
+                      </div>
+                      <p className="text-zinc-200 leading-snug">{msg.text}</p>
                     </div>
-                    <p className="text-zinc-200 leading-snug">{msg.text}</p>
-                  </div>
-                ))}
+                  );
+                })}
                 <div ref={chatBottomRef} />
               </div>
 
+              {/* Quick Reactions Chips */}
+              <div className="pt-2 flex items-center gap-1.5 overflow-x-auto pb-1 text-[10px]">
+                <button
+                  type="button"
+                  onClick={() => handleSendMessage(undefined, '♟️ Ready coach! Watching the moves.')}
+                  className="px-2 py-0.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 whitespace-nowrap transition"
+                >
+                  ♟️ Ready!
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSendMessage(undefined, '❓ Need clarification on this pawn structure')}
+                  className="px-2 py-0.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 whitespace-nowrap transition"
+                >
+                  ❓ Question
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSendMessage(undefined, '💡 Found knight fork tactic on f7!')}
+                  className="px-2 py-0.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-300 whitespace-nowrap transition"
+                >
+                  💡 Found tactic!
+                </button>
+              </div>
+
               {/* Message Input Bar */}
-              <form onSubmit={handleSendMessage} className="pt-3 border-t border-zinc-800 flex items-center gap-2">
+              <form onSubmit={handleSendMessage} className="pt-2 border-t border-zinc-800 flex items-center gap-2">
                 <input
                   type="text"
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Ask GM Vikram or share idea..."
+                  placeholder={isCoach ? "Broadcast explanation to classroom..." : "Ask coach or share tactical idea..."}
                   className="flex-1 px-3.5 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-zinc-200 focus:outline-none focus:border-orange-500 transition placeholder:text-zinc-600"
                 />
                 <button
@@ -1088,9 +1263,9 @@ export const ClassroomModule: React.FC = () => {
             </div>
           </div>
         </div>
-      ) : (
+      ) : isCoach ? (
         /* ========================================================= */
-        /* 3. Simul Multi-Board Grid (Coach Monitoring 6 Boards)     */
+        /* 3A. COACH PERSPECTIVE: Simul Multi-Board Grid (6 Boards)  */
         /* ========================================================= */
         <div className="flex flex-col gap-5 animate-in fade-in">
           {/* Simul Control Banner & Blunder Radar */}
@@ -1107,48 +1282,59 @@ export const ClassroomModule: React.FC = () => {
                   </span>
                 </h3>
                 <p className="text-xs text-zinc-400 mt-0.5">
-                  Coach GM Vikram Sen can inspect any student board in real-time, test alternative lines, or co-pilot critical endgame moves.
+                  Inspect student moves in real-time, test alternative lines, or co-pilot critical endgame moves.
                 </p>
               </div>
             </div>
 
-            {/* Filter Tabs */}
-            <div className="flex items-center gap-1.5 bg-zinc-950 p-1 rounded-xl border border-zinc-800 text-xs font-bold">
+            {/* Filter Tabs & Broadcast Action */}
+            <div className="flex items-center flex-wrap gap-2.5">
               <button
-                onClick={() => setSimulFilter('all')}
-                className={`px-3 py-1.5 rounded-lg transition ${
-                  simulFilter === 'all' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-400 hover:text-white'
-                }`}
+                onClick={handleBroadcastToSimul}
+                className="px-3 py-1.5 rounded-xl bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/40 text-orange-300 text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+                title="Push current Master Board position to all 6 students"
               >
-                All (6)
+                <Sparkles className="w-3.5 h-3.5 text-orange-400" />
+                Broadcast Position to All Boards
               </button>
-              <button
-                onClick={() => setSimulFilter('blunders')}
-                className={`px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 ${
-                  simulFilter === 'blunders' ? 'bg-rose-500/30 text-rose-300 shadow border border-rose-500/40' : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
-                Blunders ({blundersCount})
-              </button>
-              <button
-                onClick={() => setSimulFilter('hands')}
-                className={`px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 ${
-                  simulFilter === 'hands' ? 'bg-amber-500/30 text-amber-300 shadow border border-amber-500/40' : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                <Hand className="w-3.5 h-3.5 text-amber-400" />
-                Raised Hands ({raisedHandsCount})
-              </button>
+
+              <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-xl border border-zinc-800 text-xs font-bold">
+                <button
+                  onClick={() => setSimulFilter('all')}
+                  className={`px-3 py-1.5 rounded-lg transition ${
+                    simulFilter === 'all' ? 'bg-zinc-800 text-white shadow' : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  All (6)
+                </button>
+                <button
+                  onClick={() => setSimulFilter('blunders')}
+                  className={`px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 ${
+                    simulFilter === 'blunders' ? 'bg-rose-500/30 text-rose-300 shadow border border-rose-500/40' : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                  Blunders ({blundersCount})
+                </button>
+                <button
+                  onClick={() => setSimulFilter('hands')}
+                  className={`px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 ${
+                    simulFilter === 'hands' ? 'bg-amber-500/30 text-amber-300 shadow border border-amber-500/40' : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  <Hand className="w-3.5 h-3.5 text-amber-400" />
+                  Raised Hands ({raisedHandsCount})
+                </button>
+              </div>
             </div>
           </div>
 
           {/* 6-Board Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {filteredBoards.map((st) => {
-              const studentChess = new Chess();
+              const studentChessPreview = new Chess();
               try {
-                studentChess.load(st.current_fen);
+                studentChessPreview.load(st.current_fen);
               } catch {
                 // Ignore fallback
               }
@@ -1161,7 +1347,7 @@ export const ClassroomModule: React.FC = () => {
                   onClick={() => handleOpenCoPilot(st)}
                   className={`bg-zinc-900 border rounded-2xl p-4 shadow-xl transition cursor-pointer flex flex-col gap-3 group relative overflow-hidden ${
                     isHandUp
-                      ? 'border-amber-500/60 ring-1 ring-amber-500/40 shadow-amber-500/5'
+                      ? 'border-amber-500/60 ring-2 ring-amber-500/40 shadow-amber-500/10'
                       : st.status === 'blunder'
                       ? 'border-rose-500/60 ring-1 ring-rose-500/40'
                       : 'border-zinc-800 hover:border-orange-500/50'
@@ -1185,7 +1371,7 @@ export const ClassroomModule: React.FC = () => {
 
                     <div className="flex items-center gap-1.5">
                       {isHandUp && (
-                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1 animate-pulse">
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1 animate-bounce">
                           <Hand className="w-3 h-3 text-amber-400" /> HELP
                         </span>
                       )}
@@ -1207,7 +1393,7 @@ export const ClassroomModule: React.FC = () => {
 
                   {/* Scaled Mini Board */}
                   <div className="w-full aspect-square pointer-events-none rounded-xl overflow-hidden border border-zinc-800 bg-zinc-950 p-2 shadow-inner">
-                    <ChessBoard chess={studentChess} interactive={false} orientation="w" />
+                    <ChessBoard chess={studentChessPreview} interactive={false} orientation="w" />
                   </div>
 
                   {/* Footer with quick action */}
@@ -1222,6 +1408,149 @@ export const ClassroomModule: React.FC = () => {
                 </div>
               );
             })}
+          </div>
+        </div>
+      ) : (
+        /* ========================================================= */
+        /* 3B. STUDENT PERSPECTIVE: Dedicated Interactive Simul Board*/
+        /* ========================================================= */
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start animate-in fade-in">
+          {/* Main Board Column (Col 8) */}
+          <div className="lg:col-span-8 flex flex-col items-center gap-4">
+            {/* Matchup Header Banner */}
+            <div className="w-full max-w-[600px] bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex items-center justify-between shadow-lg">
+              {/* Opponent Coach */}
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-orange-500 to-amber-600 flex items-center justify-center text-white font-black text-lg shadow">
+                  👨‍🏫
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                    GM Vikram Sen <span className="text-[10px] text-orange-400">(Coach)</span>
+                  </div>
+                  <div className="text-[10px] text-zinc-400 font-mono">
+                    2650 FIDE GM • Playing White
+                  </div>
+                </div>
+              </div>
+
+              {/* Status / Eval */}
+              <div className="flex flex-col items-end">
+                <div className="flex items-center gap-2">
+                  {isMyHandRaised && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40 flex items-center gap-1 animate-pulse">
+                      <Hand className="w-3 h-3" /> Hand Raised
+                    </span>
+                  )}
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-mono font-bold border border-emerald-500/30">
+                    Live Simul Match
+                  </span>
+                </div>
+                <div className="text-xs text-zinc-300 mt-1 font-semibold">
+                  Turn: <strong className="text-orange-400">{studentChess.turn() === 'w' ? 'White to move' : 'Black to move'}</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* Student's Interactive Board */}
+            <div className="w-full max-w-[600px] bg-zinc-900 border border-zinc-800 p-4 rounded-3xl shadow-2xl space-y-3">
+              <ChessBoard
+                chess={studentChess}
+                onMove={handleStudentPersonalMove}
+                orientation="w"
+                interactive={true}
+              />
+
+              <div className="pt-2 border-t border-zinc-800 flex items-center justify-between text-xs text-zinc-400">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[11px] px-2 py-1 rounded bg-zinc-950 border border-zinc-800">
+                    Last: <strong className="text-orange-400">{myCurrentBoard?.last_move || 'None'}</strong>
+                  </span>
+                  <span className="font-mono text-[11px] px-2 py-1 rounded bg-zinc-950 border border-zinc-800">
+                    Eval: <strong className="text-emerald-400">{myCurrentBoard?.eval_score || '0.0'}</strong>
+                  </span>
+                </div>
+
+                <button
+                  onClick={handleToggleHandRaise}
+                  className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition ${
+                    isMyHandRaised
+                      ? 'bg-amber-500 text-black border-amber-400 font-black'
+                      : 'bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700'
+                  }`}
+                >
+                  <Hand className="w-4 h-4" />
+                  {isMyHandRaised ? 'Lower Hand ✋' : 'Ask Question / Raise Hand ✋'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Rail: Classroom Peers Mini-Grid (Col 4) */}
+          <div className="lg:col-span-4 flex flex-col gap-4">
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 shadow-xl flex flex-col gap-3">
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-2.5">
+                <div className="flex items-center gap-2 text-xs font-bold text-white">
+                  <Users className="w-4 h-4 text-orange-400" />
+                  Classroom Peers ({studentBoards.length})
+                </div>
+                <span className="text-[10px] text-zinc-400 font-mono">Batch Alpha</span>
+              </div>
+
+              <div className="flex flex-col gap-2.5 max-h-[500px] overflow-y-auto pr-1">
+                {studentBoards.map((peer) => {
+                  const isMe = peer.student_id === myStudentId || peer.student_id === user?.id;
+                  const peerHand = Boolean(peer.hand_raised && peer.hand_raised !== 0);
+
+                  return (
+                    <div
+                      key={peer.student_id}
+                      className={`p-2.5 rounded-xl border flex items-center justify-between transition ${
+                        isMe
+                          ? 'bg-orange-950/20 border-orange-500/50'
+                          : 'bg-zinc-950/60 border-zinc-800/80 hover:border-zinc-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-lg p-1 rounded-lg bg-zinc-900 border border-zinc-800">
+                          {peer.avatar}
+                        </span>
+                        <div>
+                          <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                            {peer.student_name}
+                            {isMe && (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-orange-500 text-white font-black">
+                                YOU
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-zinc-400 font-mono">
+                            Last: {peer.last_move || '—'} • {peer.eval_score}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        {peerHand && (
+                          <span className="text-[10px] text-amber-400 animate-bounce">
+                            ✋
+                          </span>
+                        )}
+                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
+                          peer.status === 'blunder'
+                            ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                            : peer.status === 'solved'
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                            : 'bg-zinc-800 text-zinc-400 border-zinc-700'
+                        }`}>
+                          {peer.status.toUpperCase()}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1242,13 +1571,13 @@ export const ClassroomModule: React.FC = () => {
                   <h3 className="text-base font-black text-white flex items-center gap-2">
                     Co-Pilot: {coPilotStudent.student_name}
                     {Boolean(coPilotStudent.hand_raised && coPilotStudent.hand_raised !== 0) && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40 flex items-center gap-1">
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40 flex items-center gap-1 animate-pulse">
                         <Hand className="w-3 h-3" /> Raised Hand
                       </span>
                     )}
                   </h3>
                   <p className="text-xs text-zinc-400">
-                    Make corrective moves or explain positional patterns directly to this student board.
+                    Make corrective moves or demonstrate tactical patterns directly onto this student board in real time.
                   </p>
                 </div>
               </div>

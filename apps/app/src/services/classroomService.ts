@@ -1,6 +1,7 @@
 // =========================================================
 // Chess Play Real-Time Classroom Service
-// Handles client-server synchronization, master board broadcasts & simul tracking
+// Handles client-server synchronization, master board broadcasts,
+// student interactive simul boards, raise-hand & live discussion
 // =========================================================
 
 import { ArrowAnnotation } from '../types/chess';
@@ -18,6 +19,7 @@ export interface ClassroomSession {
 
 export interface StudentBoardState {
   id: string;
+  session_id?: string;
   student_id: string;
   student_name: string;
   avatar: string;
@@ -31,6 +33,7 @@ export interface StudentBoardState {
 export interface ClassroomChatMessage {
   id: number;
   sender: string;
+  role?: string;
   text: string;
   time: string;
 }
@@ -40,7 +43,7 @@ export interface ClassroomSyncEvent {
   user_id: string;
   user_name: string;
   user_role: string;
-  event_type: 'move' | 'fen_reset' | 'arrow_draw' | 'board_lock' | 'student_move' | 'raise_hand' | 'chat_message';
+  event_type: 'move' | 'fen_reset' | 'arrow_draw' | 'board_lock' | 'student_move' | 'raise_hand' | 'chat_message' | 'simul_reset';
   payload: any;
   created_at: string;
 }
@@ -49,6 +52,8 @@ export interface ClassroomSnapshotResponse {
   status: string;
   session: ClassroomSession;
   student_boards: StudentBoardState[];
+  my_student_id?: string;
+  my_board?: StudentBoardState;
   chat_messages: ClassroomChatMessage[];
   last_event_id: number;
 }
@@ -96,7 +101,7 @@ export const classroomService = {
       if (res.ok) {
         return await res.json();
       }
-    } catch (err) {
+    } catch {
       // Temporary network jitter
     }
     return null;
@@ -172,6 +177,28 @@ export const classroomService = {
   },
 
   /**
+   * Coach broadcasts position to all 6 student simul boards
+   */
+  async broadcastToSimul(batchId: string, fen: string, token: string): Promise<boolean> {
+    try {
+      const res = await fetch(`${API_BASE}?action=broadcast_to_simul`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          batch_id: batchId,
+          fen
+        })
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  },
+
+  /**
    * Student or coach submits a move on an individual simul board
    */
   async submitStudentMove(
@@ -206,7 +233,7 @@ export const classroomService = {
   },
 
   /**
-   * Student raises or lowers hand ✋
+   * Student raises or lowers hand ✋, or coach lowers it
    */
   async setHandRaised(batchId: string, studentId: string, handRaised: boolean, token: string): Promise<boolean> {
     try {
