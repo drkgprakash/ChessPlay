@@ -43,7 +43,7 @@ export interface ClassroomSyncEvent {
   user_id: string;
   user_name: string;
   user_role: string;
-  event_type: 'move' | 'fen_reset' | 'arrow_draw' | 'board_lock' | 'student_move' | 'raise_hand' | 'chat_message' | 'simul_reset' | 'webrtc_signal' | 'stream_status';
+  event_type: 'move' | 'fen_reset' | 'arrow_draw' | 'board_lock' | 'student_move' | 'raise_hand' | 'chat_message' | 'simul_reset' | 'webrtc_signal' | 'stream_status' | 'pdf_share' | 'pdf_page' | 'pdf_close';
   payload: any;
   created_at: string;
 }
@@ -70,6 +70,15 @@ export interface ClassroomSnapshotResponse {
     streamType?: string;
     coachMicActive?: boolean;
     coachCamActive?: boolean;
+  } | null;
+  pdf_presentation?: {
+    url: string;
+    name: string;
+    size?: number;
+    current_page: number;
+    total_pages?: number;
+    is_presenting: boolean;
+    uploaded_by?: string;
   } | null;
 }
 
@@ -349,6 +358,89 @@ export const classroomService = {
           mic_active: micActive ? 1 : 0,
           screen_active: screenActive ? 1 : 0,
           stream_type: streamType
+        })
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  },
+
+  /**
+   * Upload PDF document for classroom presentation
+   */
+  async uploadPdf(batchId: string, file: File, token: string | null): Promise<{ status: string; file_url?: string; file_name?: string; pdf_presentation?: any; message?: string }> {
+    try {
+      const formData = new FormData();
+      formData.append('batch_id', batchId);
+      formData.append('pdf_file', file);
+
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const res = await fetch(`${API_BASE}?action=upload_pdf`, {
+        method: 'POST',
+        headers,
+        body: formData
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        return { status: 'error', message: errData.message || 'Upload failed' };
+      }
+      return await res.json();
+    } catch (err: any) {
+      return { status: 'error', message: err.message || 'Network error' };
+    }
+  },
+
+  /**
+   * Broadcast current page flip of active PDF presentation
+   */
+  async broadcastPdfPage(batchId: string, page: number, url: string, name: string, token: string | null): Promise<boolean> {
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const res = await fetch(`${API_BASE}?action=pdf_page`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          batch_id: batchId,
+          page,
+          url,
+          name
+        })
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  },
+
+  /**
+   * Broadcast closing/dismissal of active PDF presentation
+   */
+  async broadcastPdfClose(batchId: string, token: string | null): Promise<boolean> {
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const res = await fetch(`${API_BASE}?action=pdf_close`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          batch_id: batchId
         })
       });
       return res.ok;

@@ -186,6 +186,17 @@ if ($action === 'snapshot' && $method === 'GET') {
         $streamStatus = json_decode($latestStream['payload'], true);
     }
 
+    // Fetch latest active PDF presentation
+    $pdfStmt = $pdo->prepare("SELECT payload, event_type FROM classroom_events 
+                             WHERE batch_id = :batch_id AND event_type IN ('pdf_share', 'pdf_page', 'pdf_close') 
+                             ORDER BY id DESC LIMIT 1");
+    $pdfStmt->execute(['batch_id' => $batchId]);
+    $latestPdf = $pdfStmt->fetch();
+    $pdfPresentation = null;
+    if ($latestPdf && !empty($latestPdf['payload']) && $latestPdf['event_type'] !== 'pdf_close') {
+        $pdfPresentation = json_decode($latestPdf['payload'], true);
+    }
+
     echo json_encode([
         'status' => 'success',
         'session' => $session,
@@ -194,6 +205,7 @@ if ($action === 'snapshot' && $method === 'GET') {
         'my_board' => $myBoard,
         'chat_messages' => $chatMessages,
         'stream_status' => $streamStatus,
+        'pdf_presentation' => $pdfPresentation,
         'last_event_id' => (int)($maxEvent['max_id'] ?? 0)
     ]);
     exit;
@@ -579,8 +591,147 @@ if ($action === 'stream_status' && $method === 'POST') {
     exit;
 }
 
+// ---------------------------------------------------------
+// 10. POST ?action=upload_pdf
+// Uploads a PDF document to present in the live classroom
+// ---------------------------------------------------------
+if ($action === 'upload_pdf' && $method === 'POST') {
+    $batchId = trim($_POST['batch_id'] ?? 'batch-01');
+
+    if (!isset($_FILES['pdf_file']) || $_FILES['pdf_file']['error'] !== UPLOAD_ERR_OK) {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'No valid PDF file uploaded']);
+        exit;
+    }
+
+    $file = $_FILES['pdf_file'];
+    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+    if ($ext !== 'pdf') {
+        http_response_code(400);
+        echo json_encode(['status' => 'error', 'message' => 'Only PDF files are supported']);
+        exit;
+    }
+
+    $uploadDir = __DIR__ . '/../uploads/classroom_docs/';
+    if (!is_dir($uploadDir)) {
+        @mkdir($uploadDir, 0777, true);
+    }
+
+    $cleanName = preg_replace('/[^a-zA-Z0-9_-]/', '_', pathinfo($file['name'], PATHINFO_FILENAME));
+    $fileName = 'pdf_' . date('Ymd_His') . '_' . substr(md5(uniqid()), 0, 8) . '_' . $cleanName . '.pdf';
+    $targetPath = $uploadDir . $fileName;
+
+    if (!move_uploaded_file($file['tmp_name'], $targetPath)) {
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'message' => 'Failed to save uploaded PDF file']);
+        exit;
+    }
+
+    $fileUrl = '/uploads/classroom_docs/' . $fileName;
+
+    $sessionStmt = $pdo->prepare("SELECT id FROM classroom_sessions WHERE batch_id = :batch_id AND status = 'active' LIMIT 1");
+    $sessionStmt->execute(['batch_id' => $batchId]);
+    $session = $sessionStmt->fetch();
+    $sessionId = $session['id'] ?? 'session-01';
+
+    $payload = [
+        'url' => $fileUrl,
+        'name' => $file['name'],
+        'size' => $file['size'],
+        'current_page' => 1,
+        'is_presenting' => true,
+        'uploaded_by' => $user['name']
+    ];
+
+    $insStmt = $pdo->prepare("INSERT INTO classroom_events (session_id, batch_id, user_id, user_name, user_role, event_type, payload) 
+                             VALUES (:session_id, :batch_id, :user_id, :user_name, :user_role, 'pdf_share', :payload)");
+    $insStmt->execute([
+        'session_id' => $sessionId,
+        'batch_id' => $batchId,
+        'user_id' => $user['id'],
+        'user_name' => $user['name'],
+        'user_role' => $user['role'],
+        'payload' => json_encode($payload)
+    ]);
+
+    echo json_encode([
+        'status' => 'success',
+        'file_url' => $fileUrl,
+        'file_name' => $file['name'],
+        'event_id' => (int)$pdo->lastInsertId(),
+        'pdf_presentation' => $payload
+    ]);
+    exit;
+}
+
+// ---------------------------------------------------------
+// 11. POST ?action=pdf_page
+// Broadcasts current active page of the presentation
+// ---------------------------------------------------------
+if ($action === 'pdf_page' && $method === 'POST') {
+    $input = getJsonInput();
+    $batchId = trim($input['batch_id'] ?? 'batch-01');
+    $page = max(1, (int)($input['page'] ?? 1));
+    $fileUrl = trim($input['url'] ?? '');
+    $fileName = trim($input['name'] ?? 'Classroom Lecture');
+
+    $sessionStmt = $pdo->prepare("SELECT id FROM classroom_sessions WHERE batch_id = :batch_id AND status = 'active' LIMIT 1");
+    $sessionStmt->execute(['batch_id' => $batchId]);
+    $session = $sessionStmt->fetch();
+    $sessionId = $session['id'] ?? 'session-01';
+
+    $payload = [
+        'url' => $fileUrl,
+        'name' => $fileName,
+        'current_page' => $page,
+        'is_presenting' => true
+    ];
+
+    $insStmt = $pdo->prepare("INSERT INTO classroom_events (session_id, batch_id, user_id, user_name, user_role, event_type, payload) 
+                             VALUES (:session_id, :batch_id, :user_id, :user_name, :user_role, 'pdf_page', :payload)");
+    $insStmt->execute([
+        'session_id' => $sessionId,
+        'batch_id' => $batchId,
+        'user_id' => $user['id'],
+        'user_name' => $user['name'],
+        'user_role' => $user['role'],
+        'payload' => json_encode($payload)
+    ]);
+
+    echo json_encode(['status' => 'success', 'current_page' => $page]);
+    exit;
+}
+
+// ---------------------------------------------------------
+// 12. POST ?action=pdf_close
+// Closes the PDF presentation for all students
+// ---------------------------------------------------------
+if ($action === 'pdf_close' && $method === 'POST') {
+    $input = getJsonInput();
+    $batchId = trim($input['batch_id'] ?? 'batch-01');
+
+    $sessionStmt = $pdo->prepare("SELECT id FROM classroom_sessions WHERE batch_id = :batch_id AND status = 'active' LIMIT 1");
+    $sessionStmt->execute(['batch_id' => $batchId]);
+    $session = $sessionStmt->fetch();
+    $sessionId = $session['id'] ?? 'session-01';
+
+    $insStmt = $pdo->prepare("INSERT INTO classroom_events (session_id, batch_id, user_id, user_name, user_role, event_type, payload) 
+                             VALUES (:session_id, :batch_id, :user_id, :user_name, :user_role, 'pdf_close', :payload)");
+    $insStmt->execute([
+        'session_id' => $sessionId,
+        'batch_id' => $batchId,
+        'user_id' => $user['id'],
+        'user_name' => $user['name'],
+        'user_role' => $user['role'],
+        'payload' => json_encode(['is_presenting' => false])
+    ]);
+
+    echo json_encode(['status' => 'success']);
+    exit;
+}
+
 echo json_encode([
     'status' => 'ok',
     'service' => 'Chess Play Realtime Classroom API',
-    'actions' => ['snapshot', 'sync', 'broadcast', 'student_move', 'raise_hand', 'chat', 'broadcast_to_simul', 'signal', 'stream_status']
+    'actions' => ['snapshot', 'sync', 'broadcast', 'student_move', 'raise_hand', 'chat', 'broadcast_to_simul', 'signal', 'stream_status', 'upload_pdf', 'pdf_page', 'pdf_close']
 ]);

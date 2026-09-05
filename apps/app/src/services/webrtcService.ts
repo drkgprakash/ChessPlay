@@ -190,10 +190,10 @@ class WebRTCManager {
       });
     }
 
-    // Ensure bidirectional transceivers are present
+    // Ensure bidirectional transceivers are present and ready for 2-way audio/video anytime
     if (pc.getTransceivers().length === 0) {
-      pc.addTransceiver('audio', { direction: this.localStream ? 'sendrecv' : 'recvonly' });
-      pc.addTransceiver('video', { direction: this.localStream ? 'sendrecv' : 'recvonly' });
+      pc.addTransceiver('audio', { direction: 'sendrecv' });
+      pc.addTransceiver('video', { direction: 'sendrecv' });
     }
 
     // Handle ICE Candidates

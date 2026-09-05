@@ -7,7 +7,7 @@ import {
   RotateCcw, Send, Zap, X, ArrowRight, HelpCircle, Download, Copy, 
   BookOpen, Monitor, MonitorOff, ChevronLeft, ChevronRight, 
   ChevronsLeft, ChevronsRight, FileText, Check, Volume2, VolumeX,
-  Radio, Play, Swords
+  Radio, Play, Swords, Upload
 } from 'lucide-react';
 import { ArrowAnnotation } from '../types/chess';
 import { sounds } from '../utils/soundEffects';
@@ -103,7 +103,7 @@ export const ClassroomModule: React.FC = () => {
   const isCoach = hasPermission('classroom:master') || user?.role === 'saas_owner' || user?.role === 'academy_admin' || user?.role === 'head_coach';
 
   const [batchId] = useState<string>('batch-01');
-  const [activeTab, setActiveTab] = useState<'master' | 'simul'>('master');
+  const [activeTab, setActiveTab] = useState<'master' | 'simul' | 'pdf'>('master');
   
   // Master Chess State
   const [chess] = useState<Chess>(new Chess());
@@ -129,19 +129,12 @@ export const ClassroomModule: React.FC = () => {
   const [coPilotChess] = useState<Chess>(new Chess());
   const [coPilotFen, setCoPilotFen] = useState<string>('');
 
-  // AV & Interaction State
-  const [micOn, setMicOn] = useState<boolean>(true);
-  const [camOn, setCamOn] = useState<boolean>(true);
+  // AV & WebRTC State
   const [isMyHandRaised, setIsMyHandRaised] = useState<boolean>(false);
-
-  // Real Media AV & Screen Share
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
   const [isCamStreaming, setIsCamStreaming] = useState<boolean>(false);
   const [isScreenSharing, setIsScreenSharing] = useState<boolean>(false);
-  const [audioWave, setAudioWave] = useState<number[]>([35, 65, 90, 55, 75]);
-
-  // WebRTC Peer-to-Peer AV Streams & Audio Playback
+  const [camOn, setCamOn] = useState<boolean>(false);
+  const [micOn, setMicOn] = useState<boolean>(false);
   const [coachRemoteStream, setCoachRemoteStream] = useState<MediaStream | null>(null);
   const [studentRemoteStreams, setStudentRemoteStreams] = useState<Record<string, MediaStream>>({});
   const [remoteAudioMuted, setRemoteAudioMuted] = useState<boolean>(false);
@@ -153,13 +146,31 @@ export const ClassroomModule: React.FC = () => {
     stream_type: string;
   }>({
     cam_active: false,
-    mic_active: true,
+    mic_active: false,
     screen_active: false,
     stream_type: 'webcam'
   });
   const [studentStreamStatuses, setStudentStreamStatuses] = useState<Record<string, { cam_active: boolean; mic_active: boolean }>>({});
 
+  // Live PDF Presentation State
+  const [pdfPresentation, setPdfPresentation] = useState<{
+    url: string;
+    name: string;
+    size?: number;
+    current_page: number;
+    total_pages?: number;
+    is_presenting: boolean;
+    uploaded_by?: string;
+  } | null>(null);
+  const [pdfUploading, setPdfUploading] = useState<boolean>(false);
+  const [pdfNotice, setPdfNotice] = useState<string | null>(null);
+  const pdfInputRef = useRef<HTMLInputElement | null>(null);
+
   // Video element refs
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const [audioWave, setAudioWave] = useState<number[]>([35, 65, 90, 55, 75]);
+
   const remoteCoachVideoRef = useRef<HTMLVideoElement | null>(null);
   const studentVideoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
 
@@ -328,6 +339,10 @@ export const ClassroomModule: React.FC = () => {
                 stream_type: snapshot.stream_status.stream_type || 'webcam'
               });
             }
+          }
+
+          if (snapshot.pdf_presentation && snapshot.pdf_presentation.is_presenting) {
+            setPdfPresentation(snapshot.pdf_presentation);
           }
 
           if (typeof snapshot.last_event_id === 'number') {
@@ -499,6 +514,18 @@ export const ClassroomModule: React.FC = () => {
               if (isCoach && ev.payload?.hand_raised) {
                 sounds.playCheck();
               }
+            } else if (ev.event_type === 'pdf_share' && ev.payload) {
+              setPdfPresentation(ev.payload);
+              setActiveTab('pdf');
+              setPdfNotice(`Master GM Vikram presented study material: "${ev.payload.name || 'Lecture PDF'}"`);
+              setTimeout(() => setPdfNotice(null), 4000);
+            } else if (ev.event_type === 'pdf_page' && ev.payload) {
+              setPdfPresentation(prev => prev ? { ...prev, current_page: Number(ev.payload.current_page || 1) } : ev.payload);
+            } else if (ev.event_type === 'pdf_close') {
+              setPdfPresentation(null);
+              setActiveTab('master');
+              setPdfNotice('Study material presentation ended by Master.');
+              setTimeout(() => setPdfNotice(null), 3000);
             } else if (ev.event_type === 'chat_message' && ev.payload?.text) {
               const newMsg: ClassroomChatMessage = {
                 id: ev.id,
@@ -1230,6 +1257,64 @@ export const ClassroomModule: React.FC = () => {
     }
   };
 
+  // PDF Presentation Handlers
+  const handleTriggerPdfUpload = () => {
+    if (pdfInputRef.current) {
+      pdfInputRef.current.click();
+    }
+  };
+
+  const handlePdfFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith('.pdf')) {
+      alert('Please upload a valid PDF document.');
+      return;
+    }
+
+    if (file.size > 25 * 1024 * 1024) {
+      alert('PDF file is too large (maximum 25MB).');
+      return;
+    }
+
+    setPdfUploading(true);
+    try {
+      const res = await classroomService.uploadPdf(batchId, file, token);
+      if (res.status === 'success' && res.pdf_presentation) {
+        setPdfPresentation(res.pdf_presentation);
+        setActiveTab('pdf');
+        setPdfNotice(`Shared "${file.name}" with the live classroom!`);
+        setTimeout(() => setPdfNotice(null), 4000);
+      } else {
+        alert(res.message || 'Failed to upload PDF presentation.');
+      }
+    } catch (err: any) {
+      console.warn('PDF upload error:', err);
+      alert('Error uploading PDF document: ' + (err.message || 'Network error'));
+    } finally {
+      setPdfUploading(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handlePdfPageChange = async (newPage: number) => {
+    if (!pdfPresentation) return;
+    const safePage = Math.max(1, newPage);
+    setPdfPresentation(prev => prev ? { ...prev, current_page: safePage } : null);
+    if (token) {
+      await classroomService.broadcastPdfPage(batchId, safePage, pdfPresentation.url, pdfPresentation.name, token);
+    }
+  };
+
+  const handleClosePdfPresentation = async () => {
+    setPdfPresentation(null);
+    setActiveTab('master');
+    if (token) {
+      await classroomService.broadcastPdfClose(batchId, token);
+    }
+  };
+
   // Open Co-Pilot Modal for a student
   const handleOpenCoPilot = (student: StudentBoardState) => {
     setCoPilotStudent(student);
@@ -1405,6 +1490,20 @@ export const ClassroomModule: React.FC = () => {
                 </>
               )}
             </button>
+            {(isCoach || (pdfPresentation && pdfPresentation.is_presenting)) && (
+              <button
+                onClick={() => setActiveTab('pdf')}
+                className={`px-3.5 py-1.5 rounded-lg transition flex items-center gap-1.5 ${
+                  activeTab === 'pdf' 
+                    ? 'bg-gradient-to-r from-orange-500 to-amber-600 text-white shadow-md' 
+                    : 'text-orange-400 hover:text-white'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>{pdfPresentation ? `Lecture PDF (p.${pdfPresentation.current_page})` : 'Lecture PDF'}</span>
+                {pdfPresentation && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>}
+              </button>
+            )}
           </div>
 
           {/* Coach Remote Board Lock */}
@@ -1470,104 +1569,264 @@ export const ClassroomModule: React.FC = () => {
       {/* ========================================================= */}
       {/* 2. Main Master Board View                                */}
       {/* ========================================================= */}
-      {activeTab === 'master' ? (
+      {activeTab === 'master' || activeTab === 'pdf' ? (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Main Board Column (Col 8) */}
+          {/* Main Board / PDF Presentation Column (Col 8) */}
           <div className="lg:col-span-8 flex flex-col items-center gap-4">
-            {/* Lock Notice Banner */}
-            {boardLocked && (
-              <div className="w-full max-w-[600px] bg-rose-500/10 border border-rose-500/30 rounded-2xl p-3 flex items-center justify-between text-xs text-rose-300 animate-in fade-in">
-                <div className="flex items-center gap-2 font-medium">
-                  <Lock className="w-4 h-4 text-rose-400 shrink-0" />
-                  <span>
-                    <strong>Master Board Locked:</strong> Coach GM Vikram Sen has locked move inputs. Please follow along on screen.
-                  </span>
-                </div>
-                {isCoach && (
-                  <button
-                    onClick={handleToggleBoardLock}
-                    className="text-xs font-bold text-rose-300 underline hover:text-white"
-                  >
-                    Unlock
-                  </button>
+            {activeTab === 'master' ? (
+              <>
+                {/* Lock Notice Banner */}
+                {boardLocked && (
+                  <div className="w-full max-w-[600px] bg-rose-500/10 border border-rose-500/30 rounded-2xl p-3 flex items-center justify-between text-xs text-rose-300 animate-in fade-in">
+                    <div className="flex items-center gap-2 font-medium">
+                      <Lock className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span>
+                        <strong>Master Board Locked:</strong> Coach GM Vikram Sen has locked move inputs. Please follow along on screen.
+                      </span>
+                    </div>
+                    {isCoach && (
+                      <button
+                        onClick={handleToggleBoardLock}
+                        className="text-xs font-bold text-rose-300 underline hover:text-white"
+                      >
+                        Unlock
+                      </button>
+                    )}
+                  </div>
                 )}
-              </div>
-            )}
 
-            {/* The Master Board */}
-            <div className="w-full max-w-[600px] bg-zinc-900 border border-zinc-800 p-4 rounded-3xl shadow-2xl space-y-3">
-              <ChessBoard
-                chess={chess}
-                onMove={handleMasterMove}
-                orientation="w"
-                interactive={isCoach || !boardLocked}
-                arrows={arrows}
-                onAddArrow={handleAddArrow}
-                onClearAnnotations={handleClearArrows}
-              />
+                {/* The Master Board */}
+                <div className="w-full max-w-[600px] bg-zinc-900 border border-zinc-800 p-4 rounded-3xl shadow-2xl space-y-3">
+                  <ChessBoard
+                    chess={chess}
+                    onMove={handleMasterMove}
+                    orientation="w"
+                    interactive={isCoach || !boardLocked}
+                    arrows={arrows}
+                    onAddArrow={handleAddArrow}
+                    onClearAnnotations={handleClearArrows}
+                  />
 
-              {/* Move Navigation & PGN Actions Bar */}
-              <div className="pt-2 border-t border-zinc-800 flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={handleStepReset}
-                    className="p-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white transition"
-                    title="Jump to Start (Reset)"
-                  >
-                    <ChevronsLeft className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={handleStepPrev}
-                    className="p-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white transition"
-                    title="Step Backward (Undo Move)"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <span className="text-[11px] font-mono text-zinc-400 px-2 py-1 rounded bg-zinc-950 border border-zinc-800">
-                    {chess.history().length} Moves ({Math.ceil(chess.history().length / 2)} Plies)
-                  </span>
+                  {/* Move Navigation & PGN Actions Bar */}
+                  <div className="pt-2 border-t border-zinc-800 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={handleStepReset}
+                        className="p-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white transition"
+                        title="Jump to Start (Reset)"
+                      >
+                        <ChevronsLeft className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={handleStepPrev}
+                        className="p-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white transition"
+                        title="Step Backward (Undo Move)"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                      <span className="text-[11px] font-mono text-zinc-400 px-2 py-1 rounded bg-zinc-950 border border-zinc-800">
+                        {chess.history().length} Moves ({Math.ceil(chess.history().length / 2)} Plies)
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {isCoach && (
+                        <button
+                          onClick={handleTriggerPdfUpload}
+                          disabled={pdfUploading}
+                          className="px-3 py-1.5 rounded-xl bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/35 text-orange-300 hover:text-orange-200 text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+                          title="Upload and share a chess study PDF with all students"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-orange-400" />
+                          <span>{pdfUploading ? 'Uploading...' : 'Share PDF 📄'}</span>
+                        </button>
+                      )}
+                      <input
+                        type="file"
+                        ref={pdfInputRef}
+                        onChange={handlePdfFileSelected}
+                        accept=".pdf,application/pdf"
+                        className="hidden"
+                      />
+                      <button
+                        onClick={() => setShowStudyModal(true)}
+                        className="px-3 py-1.5 rounded-xl bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5"
+                      >
+                        <BookOpen className="w-3.5 h-3.5 text-orange-400" /> Study Library
+                      </button>
+                      <button
+                        onClick={() => setShowPgnModal(true)}
+                        className="px-3 py-1.5 rounded-xl bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5"
+                      >
+                        <Download className="w-3.5 h-3.5 text-orange-400" /> Export PGN
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setShowStudyModal(true)}
-                    className="px-3 py-1.5 rounded-xl bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5"
-                  >
-                    <BookOpen className="w-3.5 h-3.5 text-orange-400" /> Study Library
-                  </button>
-                  <button
-                    onClick={() => setShowPgnModal(true)}
-                    className="px-3 py-1.5 rounded-xl bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5"
-                  >
-                    <Download className="w-3.5 h-3.5 text-orange-400" /> Export PGN
-                  </button>
-                </div>
-              </div>
-            </div>
+                {/* Coach Presets Bar (Coach Only) */}
+                {isCoach && (
+                  <div className="w-full max-w-[600px] bg-zinc-900 border border-zinc-800 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-2 shadow-lg">
+                    <span className="text-xs font-bold text-zinc-400 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-orange-400" /> Lecture Presets:
+                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {PRESET_POSITIONS.map((pos, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => handleLoadPreset(pos.fen)}
+                          className="px-2.5 py-1 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-[11px] text-zinc-300 hover:text-orange-400 transition font-medium"
+                        >
+                          {pos.label}
+                        </button>
+                      ))}
+                      <button
+                        onClick={handleClearArrows}
+                        className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 text-[11px] font-bold border border-rose-500/30 transition"
+                      >
+                        Clear Arrows
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              /* PDF Presentation Stage */
+              <div className="w-full max-w-[700px] bg-zinc-900 border border-zinc-800 p-4 rounded-3xl shadow-2xl flex flex-col gap-3 animate-in fade-in">
+                {/* Top Document Header */}
+                <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center font-bold">
+                      <FileText className="w-5 h-5 text-orange-400" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-white flex items-center gap-2 truncate max-w-[260px] sm:max-w-md">
+                        {pdfPresentation?.name || 'Classroom Study PDF'}
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30">
+                          LIVE PRESENTATION
+                        </span>
+                      </h3>
+                      <p className="text-xs text-zinc-400 mt-0.5">
+                        {isCoach 
+                          ? 'Synchronized across all student screens in real-time. Pages change for everyone.'
+                          : 'Follow along with GM Vikram Sen. Page turns are synchronized live.'}
+                      </p>
+                    </div>
+                  </div>
 
-            {/* Coach Presets Bar (Coach Only) */}
-            {isCoach && (
-              <div className="w-full max-w-[600px] bg-zinc-900 border border-zinc-800 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-2 shadow-lg">
-                <span className="text-xs font-bold text-zinc-400 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-orange-400" /> Lecture Presets:
-                </span>
-                <div className="flex flex-wrap items-center gap-2">
-                  {PRESET_POSITIONS.map((pos, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => handleLoadPreset(pos.fen)}
-                      className="px-2.5 py-1 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-[11px] text-zinc-300 hover:text-orange-400 transition font-medium"
-                    >
-                      {pos.label}
-                    </button>
-                  ))}
-                  <button
-                    onClick={handleClearArrows}
-                    className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 text-[11px] font-bold border border-rose-500/30 transition"
-                  >
-                    Clear Arrows
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {pdfPresentation?.url && (
+                      <a
+                        href={pdfPresentation.url}
+                        download={pdfPresentation.name || 'classroom_document.pdf'}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-2.5 py-1.5 rounded-xl bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5"
+                        title="Download Document"
+                      >
+                        <Download className="w-3.5 h-3.5 text-orange-400" />
+                        <span className="hidden sm:inline">Download</span>
+                      </a>
+                    )}
+
+                    {isCoach && (
+                      <>
+                        <button
+                          onClick={handleTriggerPdfUpload}
+                          disabled={pdfUploading}
+                          className="px-2.5 py-1.5 rounded-xl bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5"
+                          title="Upload another PDF file"
+                        >
+                          <Upload className="w-3.5 h-3.5 text-orange-400" />
+                          <span className="hidden sm:inline">Change PDF</span>
+                        </button>
+
+                        <button
+                          onClick={handleClosePdfPresentation}
+                          className="px-2.5 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-bold transition flex items-center gap-1"
+                          title="Close PDF for all students and return to Master Board"
+                        >
+                          <X className="w-3.5 h-3.5" /> Stop Sharing
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
+
+                {/* PDF Viewer Body */}
+                {pdfPresentation?.url ? (
+                  <div className="w-full h-[580px] bg-zinc-950 rounded-2xl overflow-hidden border border-zinc-800 shadow-inner relative flex flex-col">
+                    <iframe
+                      src={`${pdfPresentation.url}#page=${pdfPresentation.current_page || 1}&toolbar=0&navpanes=0`}
+                      className="w-full h-full border-0 rounded-2xl bg-zinc-900"
+                      title="Lecture Document"
+                    />
+                  </div>
+                ) : (
+                  <div className="w-full h-[400px] rounded-2xl border-2 border-dashed border-zinc-800 bg-zinc-950/50 flex flex-col items-center justify-center p-6 text-center">
+                    <div className="w-16 h-16 rounded-2xl bg-orange-500/10 text-orange-400 flex items-center justify-center mb-3">
+                      <FileText className="w-8 h-8" />
+                    </div>
+                    <h4 className="text-sm font-bold text-white mb-1">No PDF Document Shared Yet</h4>
+                    <p className="text-xs text-zinc-400 max-w-sm mb-4">
+                      {isCoach 
+                        ? 'Select and upload a chess study guide, tactic worksheet, or endgame book to present live.'
+                        : 'GM Vikram Sen has not uploaded a lecture document yet. Please wait for the coach.'}
+                    </p>
+                    {isCoach && (
+                      <button
+                        onClick={handleTriggerPdfUpload}
+                        disabled={pdfUploading}
+                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-orange-500/20 transition hover:from-orange-600 hover:to-amber-700"
+                      >
+                        <Upload className="w-4 h-4" />
+                        {pdfUploading ? 'Uploading Document...' : 'Upload Lecture PDF'}
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Page Navigation Controls */}
+                {pdfPresentation?.url && (
+                  <div className="pt-2 border-t border-zinc-800 flex items-center justify-between text-xs text-zinc-400">
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handlePdfPageChange((pdfPresentation.current_page || 1) - 1)}
+                        disabled={!isCoach || (pdfPresentation.current_page || 1) <= 1}
+                        className={`p-1.5 rounded-lg border transition flex items-center gap-1 font-bold ${
+                          !isCoach || (pdfPresentation.current_page || 1) <= 1
+                            ? 'opacity-40 cursor-not-allowed bg-zinc-950 border-zinc-800 text-zinc-600'
+                            : 'bg-zinc-950 hover:bg-zinc-800 border-zinc-800 text-zinc-200 hover:text-white'
+                        }`}
+                        title="Previous Page"
+                      >
+                        <ChevronLeft className="w-4 h-4" /> Previous
+                      </button>
+
+                      <span className="font-mono text-xs px-3 py-1 rounded-lg bg-zinc-950 border border-zinc-800 text-zinc-200">
+                        Page <strong className="text-orange-400">{pdfPresentation.current_page || 1}</strong>
+                        {pdfPresentation.total_pages ? ` / ${pdfPresentation.total_pages}` : ''}
+                      </span>
+
+                      <button
+                        onClick={() => handlePdfPageChange((pdfPresentation.current_page || 1) + 1)}
+                        disabled={!isCoach}
+                        className={`p-1.5 rounded-lg border transition flex items-center gap-1 font-bold ${
+                          !isCoach
+                            ? 'opacity-40 cursor-not-allowed bg-zinc-950 border-zinc-800 text-zinc-600'
+                            : 'bg-zinc-950 hover:bg-zinc-800 border-zinc-800 text-zinc-200 hover:text-white'
+                        }`}
+                        title="Next Page"
+                      >
+                        Next <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="text-[11px] text-zinc-500 font-mono">
+                      {isCoach ? '⚡ Coach Sync Controls' : '🔒 Synchronized with Coach'}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1656,14 +1915,16 @@ export const ClassroomModule: React.FC = () => {
                 ) : (
                   /* ================= STUDENT VIEW: Show Master GM Vikram Sen's Stream ================= */
                   <>
-                    {/* Remote Coach video element: ALWAYS MOUNTED so audio plays seamlessly */}
+                    {/* Remote Coach video element: ALWAYS MOUNTED without display:none so audio decodes seamlessly */}
                     <video
                       ref={setRemoteCoachVideoRef}
                       autoPlay
                       playsInline
                       muted={remoteAudioMuted}
-                      className={`w-full h-full object-cover transition-opacity duration-300 ${
-                        coachHasVideo ? 'opacity-100 block' : 'opacity-0 hidden pointer-events-none'
+                      className={`object-cover transition-opacity duration-300 ${
+                        coachHasVideo 
+                          ? 'w-full h-full opacity-100 block relative' 
+                          : 'opacity-0 pointer-events-none absolute -top-[9999px] left-0 w-1 h-1'
                       }`}
                     />
 
@@ -1700,7 +1961,7 @@ export const ClassroomModule: React.FC = () => {
                         <div className="text-sm font-bold text-white">GM Vikram Sen</div>
                         <div className="text-xs text-orange-400 font-medium">Head Coach • Masterclass Stage</div>
 
-                        {coachStreamStatus.mic_active || (coachRemoteStream && coachRemoteStream.getAudioTracks().length > 0) ? (
+                        {coachStreamStatus.mic_active ? (
                           <div className="flex flex-col items-center gap-1 mt-2.5">
                             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-mono text-[11px] font-bold shadow-lg shadow-emerald-500/10">
                               <div className="flex items-center gap-0.5 mr-1">
@@ -1768,19 +2029,32 @@ export const ClassroomModule: React.FC = () => {
                         className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 backdrop-blur-md transition shadow-md ${
                           remoteAudioMuted 
                             ? 'bg-rose-500/80 text-white border border-rose-400/40' 
-                            : 'bg-black/70 text-zinc-200 hover:text-white border border-white/10'
+                            : !coachStreamStatus.mic_active
+                            ? 'bg-zinc-900/80 text-zinc-400 border border-zinc-700/60'
+                            : 'bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 shadow-emerald-500/10'
                         }`}
-                        title={remoteAudioMuted ? 'Click to unmute Coach audio' : 'Click to mute Coach audio'}
+                        title={
+                          !coachStreamStatus.mic_active
+                            ? 'Coach microphone is currently muted'
+                            : remoteAudioMuted 
+                            ? 'Click to hear Coach audio' 
+                            : 'Click to mute Coach audio'
+                        }
                       >
-                        {remoteAudioMuted ? (
+                        {!coachStreamStatus.mic_active ? (
+                          <>
+                            <VolumeX className="w-3.5 h-3.5 text-zinc-400" />
+                            <span>Coach Mic Muted</span>
+                          </>
+                        ) : remoteAudioMuted ? (
                           <>
                             <VolumeX className="w-3.5 h-3.5 text-rose-300" />
-                            <span>Coach Muted</span>
+                            <span>Sound Muted (Unmute)</span>
                           </>
                         ) : (
                           <>
-                            <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
-                            <span>Coach Audio On</span>
+                            <Volume2 className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+                            <span>Coach Audio Live</span>
                           </>
                         )}
                       </button>
@@ -1799,18 +2073,18 @@ export const ClassroomModule: React.FC = () => {
                 )}
               </div>
 
-              {/* Student Video Stage Strip (6 Attendees) */}
-              <div className="p-3 bg-zinc-950/80 border-t border-zinc-800">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[11px] font-bold text-zinc-400 flex items-center gap-1.5">
-                    <Users className="w-3.5 h-3.5 text-orange-400" /> Student Video Strip ({studentBoards.length})
+              {/* Student Video Stage Strip (Enlarged: 3 Students Per Row) */}
+              <div className="p-3.5 bg-zinc-950/80 border-t border-zinc-800">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-bold text-zinc-300 flex items-center gap-1.5">
+                    <Users className="w-4 h-4 text-orange-400" /> Student Video Strip ({studentBoards.length})
                   </span>
-                  <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
-                    All Connected
+                  <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 font-semibold">
+                    3 In a Row • 16:9 View
                   </span>
                 </div>
-                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                  {studentBoards.map((st, i) => {
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {studentBoards.map((st) => {
                     const isHand = Boolean(st.hand_raised && st.hand_raised !== 0);
                     const isSelf = !isCoach && (st.student_id === myStudentId || st.student_id === user?.id);
                     const stStatus = studentStreamStatuses[st.student_id];
@@ -1828,83 +2102,102 @@ export const ClassroomModule: React.FC = () => {
                             handleOpenCoPilot(st);
                           }
                         }}
-                        className={`group relative flex flex-col items-center justify-between p-2 rounded-xl border transition min-h-[96px] ${
+                        className={`group relative flex flex-col p-2.5 rounded-2xl border transition shadow-lg ${
                           isHand
-                            ? 'bg-amber-500/15 border-amber-500/50 hover:bg-amber-500/25 ring-1 ring-amber-500/30'
+                            ? 'bg-amber-500/15 border-amber-500/60 hover:bg-amber-500/25 ring-2 ring-amber-500/40'
                             : isSelf
-                            ? 'bg-blue-500/10 border-blue-500/40'
-                            : 'bg-zinc-900/90 border-zinc-800 hover:border-orange-500/40 hover:bg-zinc-800/80'
+                            ? 'bg-blue-500/10 border-blue-500/50 ring-1 ring-blue-500/30'
+                            : 'bg-zinc-900/90 border-zinc-800 hover:border-orange-500/50 hover:bg-zinc-800/80'
                         } ${isCoach ? 'cursor-pointer' : ''}`}
                         title={isCoach ? `Click to Co-Pilot ${st.student_name}` : isSelf ? 'Your video stream' : st.student_name}
                       >
-                        {/* Video Element or Avatar */}
-                        {hasLiveVideo ? (
-                          <div className="relative w-full aspect-square rounded-lg overflow-hidden bg-black mb-1 border border-zinc-700 shadow-inner">
-                            {isSelf ? (
-                              <video
-                                ref={setVideoRef}
-                                autoPlay
-                                playsInline
-                                muted
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <video
-                                ref={(el) => setStudentVideoRef(st.student_id, el)}
-                                autoPlay
-                                playsInline
-                                muted={false}
-                                className="w-full h-full object-cover"
-                              />
-                            )}
-                            <span className="absolute bottom-0.5 left-0.5 px-1 rounded bg-black/70 text-[8px] font-mono text-emerald-400">
-                              {isSelf ? 'YOU' : 'LIVE'}
+                        {/* Video Element or Avatar in 16:9 Aspect Video */}
+                        <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-zinc-950 mb-2 border border-zinc-800 shadow-inner flex items-center justify-center">
+                          {hasLiveVideo ? (
+                            <>
+                              {isSelf ? (
+                                <video
+                                  ref={setVideoRef}
+                                  autoPlay
+                                  playsInline
+                                  muted
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <video
+                                  ref={(el) => setStudentVideoRef(st.student_id, el)}
+                                  autoPlay
+                                  playsInline
+                                  muted={false}
+                                  className="w-full h-full object-cover"
+                                />
+                              )}
+                              <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-black/75 backdrop-blur-sm text-[9px] font-mono text-emerald-400 font-bold flex items-center gap-1 border border-emerald-500/20">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                                {isSelf ? 'YOU' : 'LIVE'}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="flex flex-col items-center justify-center w-full h-full p-2 relative bg-zinc-950/80">
+                              {/* Keep remote student audio playing off-screen */}
+                              {hasRemoteStream && !isSelf && (
+                                <video
+                                  ref={(el) => setStudentVideoRef(st.student_id, el)}
+                                  autoPlay
+                                  playsInline
+                                  muted={false}
+                                  className="opacity-0 pointer-events-none absolute -top-[9999px] left-0 w-1 h-1"
+                                />
+                              )}
+                              <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-base border shadow-md group-hover:scale-105 transition-transform ${
+                                isSelf 
+                                  ? 'bg-blue-600 text-white border-blue-400' 
+                                  : 'bg-gradient-to-tr from-zinc-800 to-zinc-700 text-zinc-200 border-zinc-600'
+                              }`}>
+                                {st.avatar || st.student_name.charAt(0)}
+                              </div>
+                              <span className="text-[9px] text-zinc-500 mt-1 font-mono">
+                                Camera Off
+                              </span>
+                            </div>
+                          )}
+
+                          {isHand && (
+                            <div className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full bg-amber-500 text-zinc-950 text-[10px] font-black flex items-center gap-1 animate-bounce shadow-md">
+                              ✋ HELP
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Student Name & Evaluation Footer */}
+                        <div className="flex items-center justify-between w-full pt-1 px-0.5">
+                          <div className="flex flex-col min-w-0">
+                            <span className="text-xs font-bold text-white truncate group-hover:text-orange-400 transition">
+                              {isSelf ? `${st.student_name} (You)` : st.student_name}
+                            </span>
+                            <span className="text-[10px] font-mono text-zinc-400">
+                              Eval: <strong className={st.eval_score.startsWith('+') ? 'text-emerald-400' : st.eval_score.startsWith('-') ? 'text-rose-400' : 'text-zinc-300'}>{st.eval_score || '0.0'}</strong>
                             </span>
                           </div>
-                        ) : (
-                          <div className="relative mb-1">
-                            {/* Keep remote student audio playing in background when remote camera is paused/off */}
-                            {hasRemoteStream && !isSelf && (
-                              <video
-                                ref={(el) => setStudentVideoRef(st.student_id, el)}
-                                autoPlay
-                                playsInline
-                                muted={false}
-                                className="hidden pointer-events-none"
-                              />
+
+                          <div className="flex items-center gap-1 shrink-0">
+                            {isSelf && !isCamStreaming && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleToggleCam();
+                                }}
+                                className="px-2 py-0.5 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-[10px] font-bold shadow transition"
+                              >
+                                Cam On
+                              </button>
                             )}
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs border group-hover:scale-105 transition-transform ${
-                              isSelf 
-                                ? 'bg-blue-600 text-white border-blue-400' 
-                                : 'bg-gradient-to-tr from-zinc-800 to-zinc-700 text-zinc-300 border-zinc-700'
-                            }`}>
-                              {st.avatar || st.student_name.charAt(0)}
-                            </div>
-                            {isHand && (
-                              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-500 text-zinc-950 text-[10px] font-black flex items-center justify-center animate-bounce shadow">
-                                ✋
+                            {isCoach && (
+                              <span className="text-[10px] font-bold text-orange-400 group-hover:underline">
+                                Co-Pilot →
                               </span>
                             )}
                           </div>
-                        )}
-
-                        <span className="text-[10px] font-bold text-zinc-300 truncate max-w-full text-center">
-                          {isSelf ? `${st.student_name.split(' ')[0]} (You)` : st.student_name.split(' ')[0]}
-                        </span>
-                        
-                        <div className="flex items-center gap-1 text-[8px] font-mono text-zinc-500">
-                          <span>{st.eval_score || '0.0'}</span>
-                          {isSelf && !isCamStreaming && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleToggleCam();
-                              }}
-                              className="text-[8px] text-blue-400 underline hover:text-white"
-                            >
-                              Cam On
-                            </button>
-                          )}
                         </div>
                       </div>
                     );
