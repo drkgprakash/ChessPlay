@@ -15,6 +15,7 @@ export interface UserProfile {
   academyName?: string;
   avatar: string;
   permissions: string[];
+  token?: string;
 }
 
 export interface DemoCredential {
@@ -29,6 +30,49 @@ export interface DemoCredential {
   permissionsSummary: string[];
 }
 
+export const ROLE_PERMISSIONS_MAP: Record<UserRole, string[]> = {
+  saas_owner: ['*'],
+  academy_admin: [
+    'academy:manage',
+    'academy:billing',
+    'coaches:manage',
+    'students:manage',
+    'batches:manage',
+    'classroom:view',
+    'reports:view',
+    'reports:send'
+  ],
+  head_coach: [
+    'classroom:master',
+    'classroom:simul',
+    'classroom:draw',
+    'classroom:view',
+    'homework:create',
+    'homework:grade',
+    'tournaments:manage',
+    'students:notes',
+    'reports:send'
+  ],
+  assistant_coach: [
+    'classroom:assist',
+    'classroom:view',
+    'attendance:mark',
+    'homework:grade',
+    'students:view',
+    'tournaments:view'
+  ],
+  student: [
+    'classroom:attend',
+    'homework:submit',
+    'puzzles:solve',
+    'tournaments:play'
+  ],
+  parent: [
+    'reports:view',
+    'attendance:view'
+  ]
+};
+
 export const DEMO_CREDENTIALS: DemoCredential[] = [
   {
     role: 'saas_owner',
@@ -42,7 +86,7 @@ export const DEMO_CREDENTIALS: DemoCredential[] = [
       'Manage all academies and tenant subscriptions',
       'View global MRR, revenue & analytics',
       'Oversee engine server health and API quotas',
-      'Switch into any academy view'
+      'Full root permissions (*)'
     ]
   },
   {
