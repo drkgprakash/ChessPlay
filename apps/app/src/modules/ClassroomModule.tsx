@@ -4,7 +4,9 @@ import { ChessBoard } from '../components/ChessBoard';
 import { 
   Video, VideoOff, Mic, MicOff, Lock, Unlock, Users, MessageSquare, 
   Sparkles, Eye, ShieldCheck, Hand, AlertTriangle, CheckCircle2, 
-  RotateCcw, Send, Zap, X, ArrowRight, HelpCircle
+  RotateCcw, Send, Zap, X, ArrowRight, HelpCircle, Download, Copy, 
+  BookOpen, Monitor, MonitorOff, ChevronLeft, ChevronRight, 
+  ChevronsLeft, ChevronsRight, FileText, Check, Volume2, VolumeX
 } from 'lucide-react';
 import { ArrowAnnotation } from '../types/chess';
 import { sounds } from '../utils/soundEffects';
@@ -15,6 +17,8 @@ import {
   StudentBoardState, 
   ClassroomChatMessage 
 } from '../services/classroomService';
+import { MASTER_GAMES, MasterGame } from '../data/masterGames';
+import { generateFidePgn, downloadPgnFile, copyToClipboard } from '../utils/pgnExporter';
 
 const DEFAULT_STUDENT_BOARDS: StudentBoardState[] = [
   {
@@ -121,6 +125,20 @@ export const ClassroomModule: React.FC = () => {
   const [micOn, setMicOn] = useState<boolean>(true);
   const [camOn, setCamOn] = useState<boolean>(true);
   const [isMyHandRaised, setIsMyHandRaised] = useState<boolean>(false);
+
+  // Real Media AV & Screen Share
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const [isCamStreaming, setIsCamStreaming] = useState<boolean>(false);
+  const [isScreenSharing, setIsScreenSharing] = useState<boolean>(false);
+  const [audioWave, setAudioWave] = useState<number[]>([35, 65, 90, 55, 75]);
+
+  // PGN Export & Study Library State
+  const [showPgnModal, setShowPgnModal] = useState<boolean>(false);
+  const [showStudyModal, setShowStudyModal] = useState<boolean>(false);
+  const [pgnNotice, setPgnNotice] = useState<string | null>(null);
+  const [customPgnInput, setCustomPgnInput] = useState<string>('');
+  const [activeStudyGame, setActiveStudyGame] = useState<MasterGame | null>(null);
 
   // Classroom Discussion Chat
   const [chatMessages, setChatMessages] = useState<ClassroomChatMessage[]>([
@@ -370,6 +388,203 @@ export const ClassroomModule: React.FC = () => {
     }
   };
 
+  // Waveform animation
+  useEffect(() => {
+    if (!micOn) return;
+    const interval = setInterval(() => {
+      setAudioWave([
+        Math.floor(20 + Math.random() * 75),
+        Math.floor(30 + Math.random() * 65),
+        Math.floor(40 + Math.random() * 55),
+        Math.floor(25 + Math.random() * 70),
+        Math.floor(35 + Math.random() * 60)
+      ]);
+    }, 280);
+    return () => clearInterval(interval);
+  }, [micOn]);
+
+  // Clean up media streams on unmount
+  useEffect(() => {
+    return () => {
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, []);
+
+  // Toggle Camera Stream
+  const handleToggleCam = async () => {
+    if (isCamStreaming) {
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(t => t.stop());
+        localStreamRef.current = null;
+      }
+      if (videoRef.current) videoRef.current.srcObject = null;
+      setIsCamStreaming(false);
+      setCamOn(false);
+    } else {
+      setCamOn(true);
+      try {
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: micOn });
+          localStreamRef.current = stream;
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+          }
+          setIsCamStreaming(true);
+        }
+      } catch {
+        setIsCamStreaming(false);
+      }
+    }
+  };
+
+  // Toggle Screen Share
+  const handleToggleScreenShare = async () => {
+    if (isScreenSharing) {
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(t => t.stop());
+        localStreamRef.current = null;
+      }
+      if (videoRef.current) videoRef.current.srcObject = null;
+      setIsScreenSharing(false);
+    } else {
+      try {
+        if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+          const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+          localStreamRef.current = stream;
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+          }
+          setIsScreenSharing(true);
+          stream.getVideoTracks()[0].onended = () => {
+            setIsScreenSharing(false);
+            if (videoRef.current) videoRef.current.srcObject = null;
+          };
+        }
+      } catch {
+        setIsScreenSharing(false);
+      }
+    }
+  };
+
+  // PGN Actions
+  const handleDownloadPgn = () => {
+    const pgn = generateFidePgn(chess, {
+      event: "Achiever's Chess Academy Live Masterclass — Batch Alpha",
+      site: "ChessPlay.in",
+      round: "Masterclass Lecture",
+      white: "GM Vikram Sen",
+      black: "Batch Alpha Students"
+    });
+    const filename = `ChessPlay_Masterclass_${batchId}_${Date.now()}.pgn`;
+    downloadPgnFile(filename, pgn);
+    setPgnNotice('PGN game file downloaded!');
+    setShowPgnModal(false);
+    setTimeout(() => setPgnNotice(null), 3500);
+  };
+
+  const handleCopyPgn = async () => {
+    const pgn = generateFidePgn(chess, {
+      event: "Achiever's Chess Academy Live Masterclass — Batch Alpha",
+      white: "GM Vikram Sen",
+      black: "Batch Alpha Students"
+    });
+    const ok = await copyToClipboard(pgn);
+    if (ok) {
+      setPgnNotice('Standard FIDE PGN copied to clipboard!');
+      setShowPgnModal(false);
+      setTimeout(() => setPgnNotice(null), 3500);
+    }
+  };
+
+  const handleCopyFen = async () => {
+    const ok = await copyToClipboard(chess.fen());
+    if (ok) {
+      setPgnNotice('Current board FEN copied to clipboard!');
+      setShowPgnModal(false);
+      setTimeout(() => setPgnNotice(null), 3500);
+    }
+  };
+
+  // Load Master Game
+  const handleLoadMasterGame = async (game: MasterGame) => {
+    try {
+      const c = new Chess(game.initialFen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+      for (const m of game.moves) {
+        c.move(m);
+      }
+      chess.load(c.fen());
+      setFen(c.fen());
+      setActiveStudyGame(game);
+      setShowStudyModal(false);
+      sounds.playMove();
+
+      if (token) {
+        await classroomService.broadcastMove(batchId, c.fen(), `Loaded: ${game.title}`, token);
+      }
+      setPgnNotice(`Loaded "${game.title}" onto Master Board!`);
+      setTimeout(() => setPgnNotice(null), 4000);
+    } catch {
+      alert('Unable to load master game.');
+    }
+  };
+
+  // Import Custom PGN or FEN
+  const handleImportCustom = async () => {
+    const input = customPgnInput.trim();
+    if (!input) return;
+
+    try {
+      const testChess = new Chess();
+      if (input.includes('/') && !input.includes('[')) {
+        testChess.load(input);
+        chess.load(input);
+      } else {
+        testChess.loadPgn(input);
+        chess.loadPgn(input);
+      }
+      setFen(chess.fen());
+      sounds.playMove();
+      setShowStudyModal(false);
+      setCustomPgnInput('');
+      if (token && isCoach) {
+        await classroomService.broadcastMove(batchId, chess.fen(), 'Imported Custom Study', token);
+      }
+      setPgnNotice('Custom study successfully imported onto Master Board!');
+      setTimeout(() => setPgnNotice(null), 4000);
+    } catch {
+      alert('Invalid PGN or FEN format. Please check and try again.');
+    }
+  };
+
+  // Step Undo 1 move
+  const handleStepPrev = async () => {
+    try {
+      const undone = chess.undo();
+      if (undone) {
+        sounds.playMove();
+        const nextFen = chess.fen();
+        setFen(nextFen);
+        if (token && isCoach) {
+          await classroomService.broadcastMove(batchId, nextFen, `Step: ${undone.san}`, token);
+        }
+      }
+    } catch {}
+  };
+
+  // Reset to Start
+  const handleStepReset = async () => {
+    chess.reset();
+    sounds.playMove();
+    const nextFen = chess.fen();
+    setFen(nextFen);
+    setActiveStudyGame(null);
+    if (token && isCoach) {
+      await classroomService.broadcastMove(batchId, nextFen, 'Reset to move 1', token);
+    }
+  };
+
   // Open Co-Pilot Modal for a student
   const handleOpenCoPilot = (student: StudentBoardState) => {
     setCoPilotStudent(student);
@@ -550,13 +765,22 @@ export const ClassroomModule: React.FC = () => {
               {micOn ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
             </button>
             <button
-              onClick={() => setCamOn(prev => !prev)}
+              onClick={handleToggleCam}
               className={`p-2 rounded-lg text-xs transition ${
-                camOn ? 'text-zinc-300 hover:text-white hover:bg-zinc-800' : 'bg-rose-500/20 text-rose-300'
+                isCamStreaming || camOn ? 'text-zinc-300 hover:text-white hover:bg-zinc-800' : 'bg-rose-500/20 text-rose-300'
               }`}
-              title={camOn ? 'Stop Camera' : 'Start Camera'}
+              title={isCamStreaming || camOn ? 'Stop Camera' : 'Start Camera Stream'}
             >
-              {camOn ? <Video className="w-4 h-4" /> : <VideoOff className="w-4 h-4" />}
+              {isCamStreaming || camOn ? <Video className="w-4 h-4 text-emerald-400" /> : <VideoOff className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={handleToggleScreenShare}
+              className={`p-2 rounded-lg text-xs transition ${
+                isScreenSharing ? 'bg-orange-500 text-white shadow-md' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+              }`}
+              title={isScreenSharing ? 'Stop Screen Share' : 'Share Screen in Masterclass'}
+            >
+              {isScreenSharing ? <MonitorOff className="w-4 h-4" /> : <Monitor className="w-4 h-4" />}
             </button>
           </div>
         </div>
@@ -590,7 +814,7 @@ export const ClassroomModule: React.FC = () => {
             )}
 
             {/* The Master Board */}
-            <div className="w-full max-w-[600px] bg-zinc-900 border border-zinc-800 p-4 rounded-3xl shadow-2xl">
+            <div className="w-full max-w-[600px] bg-zinc-900 border border-zinc-800 p-4 rounded-3xl shadow-2xl space-y-3">
               <ChessBoard
                 chess={chess}
                 onMove={handleMasterMove}
@@ -600,7 +824,55 @@ export const ClassroomModule: React.FC = () => {
                 onAddArrow={handleAddArrow}
                 onClearAnnotations={handleClearArrows}
               />
+
+              {/* Move Navigation & PGN Actions Bar */}
+              <div className="pt-2 border-t border-zinc-800 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={handleStepReset}
+                    className="p-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white transition"
+                    title="Jump to Start (Reset)"
+                  >
+                    <ChevronsLeft className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={handleStepPrev}
+                    className="p-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white transition"
+                    title="Step Backward (Undo Move)"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className="text-[11px] font-mono text-zinc-400 px-2 py-1 rounded bg-zinc-950 border border-zinc-800">
+                    {chess.history().length} Moves ({Math.ceil(chess.history().length / 2)} Plies)
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowStudyModal(true)}
+                    className="px-2.5 py-1.5 rounded-xl bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-400 font-bold text-xs flex items-center gap-1.5 transition"
+                    title="Load Classic GM Games or Import PGN"
+                  >
+                    <BookOpen className="w-3.5 h-3.5" /> GM Studies
+                  </button>
+
+                  <button
+                    onClick={() => setShowPgnModal(true)}
+                    className="px-2.5 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-750 border border-zinc-700 text-zinc-200 font-bold text-xs flex items-center gap-1.5 transition"
+                    title="Export PGN or Copy to Clipboard"
+                  >
+                    <Download className="w-3.5 h-3.5" /> Export PGN
+                  </button>
+                </div>
+              </div>
             </div>
+
+            {/* PGN / FEN Toast Alert */}
+            {pgnNotice && (
+              <div className="w-full max-w-[600px] p-2.5 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-bold text-center flex items-center justify-center gap-2 animate-in fade-in">
+                <CheckCircle2 className="w-4 h-4" /> {pgnNotice}
+              </div>
+            )}
 
             {/* Coach Quick Tactics & Presets Bar */}
             {isCoach && (
@@ -636,30 +908,136 @@ export const ClassroomModule: React.FC = () => {
 
           {/* Classroom Side Panel: Video Stream & Chat (Col 4) */}
           <div className="lg:col-span-4 flex flex-col gap-4">
-            {/* Coach Video Stream Tile */}
-            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-xl">
-              <div className="aspect-video bg-gradient-to-br from-zinc-800 via-zinc-900 to-zinc-950 relative flex items-center justify-center">
-                {camOn ? (
-                  <div className="text-center p-4">
-                    <div className="w-16 h-16 rounded-2xl bg-orange-500/20 text-orange-400 text-3xl flex items-center justify-center mx-auto border border-orange-500/40 shadow-inner">
-                      👨‍🏫
-                    </div>
-                    <span className="text-xs font-black text-white mt-2 block">GM Vikram Sen</span>
-                    <span className="text-[10px] text-zinc-400 font-medium">Head Coach & FIDE Master</span>
-                  </div>
-                ) : (
-                  <div className="text-xs text-zinc-500 flex items-center gap-2">
-                    <VideoOff className="w-4 h-4" /> Camera Stream Paused
+            {/* Coach Live AV Stage Tile */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden shadow-xl flex flex-col">
+              <div className="aspect-video bg-gradient-to-br from-zinc-800 via-zinc-900 to-zinc-950 relative flex items-center justify-center overflow-hidden">
+                {/* Real HTML5 Video element */}
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={`w-full h-full object-cover absolute inset-0 transition-opacity duration-300 ${
+                    (isCamStreaming || isScreenSharing) ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                  }`}
+                />
+
+                {/* Video Placeholder / Fallback Stage when camera is simulated or off */}
+                {!(isCamStreaming || isScreenSharing) && (
+                  <div className="text-center p-4 z-10">
+                    {camOn ? (
+                      <div className="flex flex-col items-center">
+                        <div className="relative">
+                          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-orange-500/30 to-amber-500/20 text-orange-400 text-3xl flex items-center justify-center border border-orange-500/40 shadow-inner">
+                            👨‍🏫
+                          </div>
+                          {micOn && (
+                            <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-emerald-500 border-2 border-zinc-900 flex items-center justify-center">
+                              <Volume2 className="w-3 h-3 text-zinc-950" />
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-xs font-black text-white mt-2 block">GM Vikram Sen</span>
+                        <span className="text-[10px] text-zinc-400 font-medium">Head Coach & FIDE Master</span>
+
+                        {/* Live Audio Equalizer Waveform */}
+                        {micOn ? (
+                          <div className="flex items-center gap-1 mt-2.5 h-4 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
+                            {audioWave.map((h, i) => (
+                              <span
+                                key={i}
+                                className="w-1 bg-emerald-400 rounded-full transition-all duration-150"
+                                style={{ height: `${h}px` }}
+                              />
+                            ))}
+                            <span className="text-[9px] font-mono text-emerald-400 font-bold ml-1">MIC LIVE</span>
+                          </div>
+                        ) : (
+                          <span className="text-[9px] font-mono text-zinc-500 font-medium mt-2 flex items-center gap-1">
+                            <VolumeX className="w-3 h-3 text-zinc-500" /> Mic Muted
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-zinc-500 flex flex-col items-center gap-2">
+                        <div className="w-12 h-12 rounded-xl bg-zinc-800 flex items-center justify-center text-zinc-500">
+                          <VideoOff className="w-5 h-5" />
+                        </div>
+                        <span>Camera Stream Paused</span>
+                        <span className="text-[10px] text-zinc-600">Click camera button to resume broadcast</span>
+                      </div>
+                    )}
                   </div>
                 )}
-                
-                <div className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-full bg-black/70 backdrop-blur-md text-[10px] font-mono font-semibold text-emerald-400 flex items-center gap-1.5 border border-white/10">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  1080p 60FPS
+
+                {/* Overlays / Stream Badges */}
+                <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 z-20">
+                  <div className="px-2.5 py-0.5 rounded-full bg-black/70 backdrop-blur-md text-[10px] font-mono font-semibold text-emerald-400 flex items-center gap-1.5 border border-white/10">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    {isScreenSharing ? 'SCREEN CAST' : isCamStreaming ? 'LIVE WEBCAM' : '1080p 60FPS'}
+                  </div>
                 </div>
 
-                <div className="absolute bottom-2.5 right-2.5 px-2 py-0.5 rounded bg-black/60 backdrop-blur-sm text-[10px] font-mono text-zinc-300">
+                <div className="absolute bottom-2.5 right-2.5 px-2 py-0.5 rounded bg-black/60 backdrop-blur-sm text-[10px] font-mono text-zinc-300 z-20">
                   Latency: 38ms
+                </div>
+
+                {isScreenSharing && (
+                  <div className="absolute bottom-2.5 left-2.5 px-2 py-0.5 rounded bg-blue-500/80 backdrop-blur-sm text-[10px] font-bold text-white flex items-center gap-1 z-20">
+                    <Monitor className="w-3 h-3" /> Sharing Screen
+                  </div>
+                )}
+              </div>
+
+              {/* Student Video Stage Strip (6 Attendees) */}
+              <div className="p-3 bg-zinc-950/80 border-t border-zinc-800">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-bold text-zinc-400 flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-orange-400" /> Student Video Strip ({studentBoards.length})
+                  </span>
+                  <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                    All Connected
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                  {studentBoards.map((st, i) => {
+                    const isHand = Boolean(st.hand_raised && st.hand_raised !== 0);
+                    const isSpeaking = i % 3 === 1; // Simulated active audio pulse for classroom activity
+                    return (
+                      <div
+                        key={st.student_id}
+                        onClick={() => setCoPilotStudent(st)}
+                        className={`group relative flex flex-col items-center justify-center p-2 rounded-xl border transition cursor-pointer ${
+                          isHand
+                            ? 'bg-amber-500/15 border-amber-500/50 hover:bg-amber-500/25'
+                            : 'bg-zinc-900/90 border-zinc-800 hover:border-orange-500/40 hover:bg-zinc-800/80'
+                        }`}
+                        title={`Click to Co-Pilot ${st.student_name}`}
+                      >
+                        <div className="relative mb-1">
+                          <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-zinc-800 to-zinc-700 text-zinc-300 font-bold text-xs flex items-center justify-center border border-zinc-700 group-hover:scale-105 transition-transform">
+                            {st.student_name.charAt(0)}
+                          </div>
+                          {isHand && (
+                            <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-500 text-zinc-950 text-[10px] font-black flex items-center justify-center animate-bounce shadow">
+                              ✋
+                            </span>
+                          )}
+                          {isSpeaking && (
+                            <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 border-2 border-zinc-900 flex items-center justify-center">
+                              <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping"></span>
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] font-bold text-zinc-300 truncate max-w-full text-center">
+                          {st.student_name.split(' ')[0]}
+                        </span>
+                        <span className="text-[8px] font-mono text-zinc-500">
+                          {(st as any).rating || '1420'}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -919,6 +1297,176 @@ export const ClassroomModule: React.FC = () => {
                   className="px-4 py-2 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-xs font-bold text-white transition shadow-md shadow-orange-500/20"
                 >
                   Done Co-Piloting
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* 5. FIDE PGN Export Modal                                 */}
+      {/* ========================================================= */}
+      {showPgnModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-xl p-6 shadow-2xl flex flex-col gap-4">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center font-bold">
+                  <Download className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white">Export FIDE PGN & Game Notation</h3>
+                  <p className="text-[11px] text-zinc-400">Official 7-tag roster, moves history, and clipboard sharing</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowPgnModal(false)}
+                className="p-1.5 rounded-lg bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* PGN Code Block */}
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between text-[11px] text-zinc-400">
+                <span>Standard FIDE PGN Representation</span>
+                <span className="font-mono text-zinc-500">{chess.history().length} plies played</span>
+              </div>
+              <pre className="bg-zinc-950 border border-zinc-800 rounded-xl p-3.5 text-[11px] font-mono text-zinc-300 max-h-60 overflow-y-auto whitespace-pre-wrap select-all leading-relaxed">
+                {generateFidePgn(chess, {
+                  event: "Achiever's Chess Academy Live Masterclass — Batch Alpha",
+                  site: "ChessPlay.in",
+                  round: "Masterclass Lecture",
+                  white: "GM Vikram Sen",
+                  black: "Batch Alpha Students"
+                })}
+              </pre>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-zinc-800">
+              <button
+                onClick={handleCopyFen}
+                className="px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 hover:text-white transition flex items-center gap-1.5"
+              >
+                <FileText className="w-3.5 h-3.5 text-zinc-400" /> Copy FEN
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleCopyPgn}
+                  className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-bold text-zinc-200 hover:text-white transition flex items-center gap-1.5"
+                >
+                  <Copy className="w-3.5 h-3.5 text-orange-400" /> Copy PGN
+                </button>
+                <button
+                  onClick={handleDownloadPgn}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-xs font-bold text-white transition shadow-lg shadow-orange-500/20 flex items-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" /> Download .pgn
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* 6. GM Masterclass Study Library & PGN/FEN Importer       */}
+      {/* ========================================================= */}
+      {showStudyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl p-6 shadow-2xl flex flex-col gap-5 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-orange-500/20 text-orange-400 flex items-center justify-center font-bold">
+                  <BookOpen className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white">GM Masterclass Studies & PGN Importer</h3>
+                  <p className="text-[11px] text-zinc-400">Load historic masterpiece games or paste custom notation onto Master Board</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowStudyModal(false)}
+                className="p-1.5 rounded-lg bg-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-700 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Section 1: Curated Master Games */}
+            <div className="flex flex-col gap-3">
+              <span className="text-xs font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-2">
+                <Sparkles className="w-3.5 h-3.5 text-orange-400" /> Historic Grandmaster Games ({MASTER_GAMES.length})
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {MASTER_GAMES.map((game) => (
+                  <div
+                    key={game.id}
+                    className="p-3.5 rounded-xl bg-zinc-950/70 border border-zinc-800 hover:border-orange-500/50 transition flex flex-col justify-between gap-3 group"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-mono text-orange-400 font-bold px-1.5 py-0.5 rounded bg-orange-500/10 border border-orange-500/20">
+                          {game.eco} • {game.theme}
+                        </span>
+                        <span className="text-[10px] font-mono text-zinc-400">{game.date}</span>
+                      </div>
+                      <h4 className="text-xs font-black text-white mt-1.5 group-hover:text-orange-300 transition">
+                        {game.title}
+                      </h4>
+                      <p className="text-[11px] text-zinc-400 mt-1 line-clamp-2 leading-relaxed">
+                        {game.description}
+                      </p>
+                      <div className="text-[10px] text-zinc-500 font-mono mt-2">
+                        {game.white} vs {game.black} ({game.result})
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleLoadMasterGame(game)}
+                      className="w-full py-1.5 rounded-lg bg-zinc-800 hover:bg-orange-500 hover:text-white text-zinc-300 text-xs font-bold transition flex items-center justify-center gap-1.5"
+                    >
+                      <BookOpen className="w-3.5 h-3.5" /> Load into Classroom
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Section 2: Custom PGN / FEN Importer */}
+            <div className="flex flex-col gap-2.5 pt-4 border-t border-zinc-800">
+              <span className="text-xs font-bold text-zinc-300 uppercase tracking-wider flex items-center gap-2">
+                <FileText className="w-3.5 h-3.5 text-orange-400" /> Import Custom PGN or FEN String
+              </span>
+              <p className="text-[11px] text-zinc-400">
+                Paste any standard PGN text or FEN board position to immediately broadcast to all students:
+              </p>
+              <textarea
+                rows={4}
+                value={customPgnInput}
+                onChange={(e) => setCustomPgnInput(e.target.value)}
+                placeholder="Paste PGN (e.g. 1. e4 e5 2. Nf3 Nc6 3. Bb5...) or FEN position..."
+                className="w-full p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-xs font-mono text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-orange-500 transition resize-none"
+              />
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  onClick={() => {
+                    setCustomPgnInput('');
+                    setShowStudyModal(false);
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleImportCustom}
+                  disabled={!customPgnInput.trim()}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 disabled:opacity-40 text-xs font-bold text-white transition shadow-lg shadow-orange-500/20 flex items-center gap-1.5"
+                >
+                  <Sparkles className="w-3.5 h-3.5" /> Import & Broadcast
                 </button>
               </div>
             </div>
