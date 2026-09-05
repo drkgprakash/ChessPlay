@@ -56,6 +56,21 @@ export interface ClassroomSnapshotResponse {
   my_board?: StudentBoardState;
   chat_messages: ClassroomChatMessage[];
   last_event_id: number;
+  stream_status?: {
+    user_id?: string;
+    user_name?: string;
+    role?: string;
+    cam_active?: number | boolean;
+    mic_active?: number | boolean;
+    screen_active?: number | boolean;
+    stream_type?: string;
+    isCamStreaming?: boolean;
+    isScreenSharing?: boolean;
+    streamActive?: boolean;
+    streamType?: string;
+    coachMicActive?: boolean;
+    coachCamActive?: boolean;
+  } | null;
 }
 
 export interface ClassroomSyncResponse {
@@ -295,6 +310,9 @@ export const classroomService = {
         body: JSON.stringify({
           batch_id: batchId,
           target_user_id: signal.target_user_id,
+          from_user_id: signal.from_user_id,
+          from_user_name: signal.from_user_name,
+          from_user_role: signal.from_user_role,
           signal_type: signal.signal_type,
           signal_data: signal.signal_data
         })
@@ -314,7 +332,8 @@ export const classroomService = {
     micActive: boolean,
     screenActive: boolean,
     streamType: string,
-    token: string
+    token: string,
+    userId?: string
   ): Promise<boolean> {
     try {
       const res = await fetch(`${API_BASE}?action=stream_status`, {
@@ -325,6 +344,7 @@ export const classroomService = {
         },
         body: JSON.stringify({
           batch_id: batchId,
+          user_id: userId,
           cam_active: camActive ? 1 : 0,
           mic_active: micActive ? 1 : 0,
           screen_active: screenActive ? 1 : 0,

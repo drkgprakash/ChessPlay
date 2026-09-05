@@ -18,7 +18,7 @@ import {
   StudentBoardState, 
   ClassroomChatMessage 
 } from '../services/classroomService';
-import { webrtcService, WebRTCSignalPayload } from '../services/webrtcService';
+import { webrtcService, WebRTCSignalPayload, normalizeClassroomPeerId } from '../services/webrtcService';
 import { MASTER_GAMES, MasterGame } from '../data/masterGames';
 import { generateFidePgn, downloadPgnFile, copyToClipboard } from '../utils/pgnExporter';
 
@@ -318,6 +318,18 @@ export const ClassroomModule: React.FC = () => {
             ]);
           }
 
+          if (snapshot.stream_status) {
+            const isPeerCoach = snapshot.stream_status.role === 'head_coach' || snapshot.stream_status.role === 'saas_owner' || snapshot.stream_status.role === 'academy_admin';
+            if (isPeerCoach) {
+              setCoachStreamStatus({
+                cam_active: Boolean(snapshot.stream_status.cam_active),
+                mic_active: Boolean(snapshot.stream_status.mic_active),
+                screen_active: Boolean(snapshot.stream_status.screen_active),
+                stream_type: snapshot.stream_status.stream_type || 'webcam'
+              });
+            }
+          }
+
           if (typeof snapshot.last_event_id === 'number') {
             setLastEventId(snapshot.last_event_id);
             lastEventIdRef.current = snapshot.last_event_id;
@@ -341,7 +353,7 @@ export const ClassroomModule: React.FC = () => {
   useEffect(() => {
     if (!token || !user) return;
 
-    const currentUid = isCoach ? (user.id || 'coach-01') : (myStudentId || user.id || 'st-1');
+    const currentUid = isCoach ? 'coach' : (myStudentId || 'st-1');
     const currentName = user.name || (isCoach ? 'GM Vikram Sen' : 'Student');
     const currentRole = user.role || (isCoach ? 'head_coach' : 'student');
 
@@ -353,14 +365,19 @@ export const ClassroomModule: React.FC = () => {
         return classroomService.sendSignal(batchId, signal, token);
       },
       (peerUserId: string, stream: MediaStream, peerRole?: string) => {
-        const isPeerCoach = peerRole === 'head_coach' || peerRole === 'saas_owner' || peerRole === 'academy_admin' || peerUserId.includes('coach');
+        const isPeerCoach = normalizeClassroomPeerId(peerUserId, peerRole) === 'coach';
         if (isPeerCoach) {
           setCoachRemoteStream(stream);
-          setCoachStreamStatus(prev => ({ ...prev, cam_active: true }));
+          setCoachStreamStatus(prev => ({ 
+            ...prev, 
+            cam_active: stream.getVideoTracks().some(t => t.readyState === 'live' && t.enabled),
+            mic_active: stream.getAudioTracks().some(t => t.readyState === 'live' && t.enabled)
+          }));
         } else {
+          const normSid = normalizeClassroomPeerId(peerUserId, peerRole);
           setStudentRemoteStreams(prev => ({
             ...prev,
-            [peerUserId]: stream
+            [normSid]: stream
           }));
         }
       }
@@ -368,6 +385,9 @@ export const ClassroomModule: React.FC = () => {
 
     // Announce presence / stream status to peers
     webrtcService.announceStreamReady('webcam');
+    if (!isCoach) {
+      webrtcService.callPeer('coach', 'head_coach');
+    }
 
     return () => {
       webrtcService.cleanup();
@@ -714,7 +734,8 @@ export const ClassroomModule: React.FC = () => {
         nextMic, 
         isScreenSharing, 
         isScreenSharing ? 'screen' : 'webcam', 
-        token
+        token,
+        isCoach ? 'coach' : (myStudentId || 'st-1')
       );
     }
   };
@@ -733,7 +754,15 @@ export const ClassroomModule: React.FC = () => {
       setCamOn(false);
       webrtcService.setLocalStream(null);
       if (token) {
-        classroomService.broadcastStreamStatus(batchId, false, micOn, false, 'webcam', token);
+        classroomService.broadcastStreamStatus(
+          batchId, 
+          false, 
+          micOn, 
+          false, 
+          'webcam', 
+          token,
+          isCoach ? 'coach' : (myStudentId || 'st-1')
+        );
       }
     } else {
       setCamOn(true);
@@ -760,14 +789,24 @@ export const ClassroomModule: React.FC = () => {
         webrtcService.announceStreamReady('webcam');
 
         if (token) {
-          classroomService.broadcastStreamStatus(batchId, true, micOn, false, 'webcam', token);
+          classroomService.broadcastStreamStatus(
+            batchId, 
+            true, 
+            micOn, 
+            false, 
+            'webcam', 
+            token,
+            isCoach ? 'coach' : (myStudentId || 'st-1')
+          );
         }
 
-        // If coach, proactively call connected students
+        // Proactively call other party
         if (isCoach) {
           studentBoards.forEach(sb => {
             webrtcService.callPeer(sb.student_id, 'student');
           });
+        } else {
+          webrtcService.callPeer('coach', 'head_coach');
         }
 
         stream.getVideoTracks().forEach(track => {
@@ -776,7 +815,15 @@ export const ClassroomModule: React.FC = () => {
             if (videoRef.current) videoRef.current.srcObject = null;
             webrtcService.setLocalStream(null);
             if (token) {
-              classroomService.broadcastStreamStatus(batchId, false, micOn, false, 'webcam', token);
+              classroomService.broadcastStreamStatus(
+                batchId, 
+                false, 
+                micOn, 
+                false, 
+                'webcam', 
+                token,
+                isCoach ? 'coach' : (myStudentId || 'st-1')
+              );
             }
           };
         });
@@ -801,7 +848,15 @@ export const ClassroomModule: React.FC = () => {
       setIsScreenSharing(false);
       webrtcService.setLocalStream(null);
       if (token) {
-        classroomService.broadcastStreamStatus(batchId, false, micOn, false, 'screen', token);
+        classroomService.broadcastStreamStatus(
+          batchId, 
+          false, 
+          micOn, 
+          false, 
+          'screen', 
+          token,
+          isCoach ? 'coach' : (myStudentId || 'st-1')
+        );
       }
     } else {
       try {
@@ -823,13 +878,23 @@ export const ClassroomModule: React.FC = () => {
         webrtcService.announceStreamReady('screen');
 
         if (token) {
-          classroomService.broadcastStreamStatus(batchId, true, micOn, true, 'screen', token);
+          classroomService.broadcastStreamStatus(
+            batchId, 
+            true, 
+            micOn, 
+            true, 
+            'screen', 
+            token,
+            isCoach ? 'coach' : (myStudentId || 'st-1')
+          );
         }
 
         if (isCoach) {
           studentBoards.forEach(sb => {
             webrtcService.callPeer(sb.student_id, 'student');
           });
+        } else {
+          webrtcService.callPeer('coach', 'head_coach');
         }
 
         stream.getVideoTracks()[0].onended = () => {
@@ -837,13 +902,48 @@ export const ClassroomModule: React.FC = () => {
           if (videoRef.current) videoRef.current.srcObject = null;
           webrtcService.setLocalStream(null);
           if (token) {
-            classroomService.broadcastStreamStatus(batchId, false, micOn, false, 'screen', token);
+            classroomService.broadcastStreamStatus(
+              batchId, 
+              false, 
+              micOn, 
+              false, 
+              'screen', 
+              token,
+              isCoach ? 'coach' : (myStudentId || 'st-1')
+            );
           }
         };
       } catch (err: any) {
         console.warn('Screen share error:', err);
         setIsScreenSharing(false);
       }
+    }
+  };
+
+  // Re-sync AV Feed
+  const handleResyncAV = async () => {
+    if (isCoach) {
+      if (localStreamRef.current) {
+        webrtcService.setLocalStream(localStreamRef.current);
+      }
+      webrtcService.announceStreamReady(isScreenSharing ? 'screen' : 'webcam');
+      if (token) {
+        classroomService.broadcastStreamStatus(
+          batchId, 
+          isCamStreaming, 
+          micOn, 
+          isScreenSharing, 
+          isScreenSharing ? 'screen' : 'webcam', 
+          token,
+          'coach'
+        );
+      }
+      studentBoards.forEach(sb => {
+        webrtcService.callPeer(sb.student_id, 'student');
+      });
+    } else {
+      webrtcService.announceStreamReady('webcam');
+      webrtcService.callPeer('coach', 'head_coach');
     }
   };
 
@@ -1024,6 +1124,12 @@ export const ClassroomModule: React.FC = () => {
 
   // Current student personal board
   const myCurrentBoard = studentBoards.find(s => s.student_id === myStudentId || s.student_id === user?.id) || studentBoards[0];
+
+  // Whether coach's remote stream has an active video track
+  const coachHasVideo = Boolean(
+    coachRemoteStream &&
+    coachRemoteStream.getVideoTracks().some(t => t.readyState === 'live' && t.enabled)
+  );
 
   return (
     <div className="flex flex-col gap-6 max-w-7xl mx-auto pb-12">
@@ -1383,13 +1489,14 @@ export const ClassroomModule: React.FC = () => {
                 ) : (
                   /* ================= STUDENT VIEW: Show Master GM Vikram Sen's Stream ================= */
                   <>
+                    {/* Remote Coach video element: ALWAYS MOUNTED so audio plays seamlessly */}
                     <video
                       ref={setRemoteCoachVideoRef}
                       autoPlay
                       playsInline
                       muted={remoteAudioMuted}
                       className={`w-full h-full object-cover transition-opacity duration-300 ${
-                        coachRemoteStream ? 'opacity-100 block' : 'opacity-0 hidden pointer-events-none'
+                        coachHasVideo ? 'opacity-100 block' : 'opacity-0 hidden pointer-events-none'
                       }`}
                     />
 
@@ -1418,7 +1525,7 @@ export const ClassroomModule: React.FC = () => {
                     )}
 
                     {/* Coach Card when Coach is NOT streaming video */}
-                    {!coachRemoteStream && (
+                    {!coachHasVideo && (
                       <div className="flex flex-col items-center justify-center p-6 text-center w-full h-full animate-in fade-in">
                         <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-orange-500 to-amber-600 flex items-center justify-center text-white font-black text-2xl shadow-lg shadow-orange-500/30 mb-2">
                           ♟️
@@ -1426,7 +1533,7 @@ export const ClassroomModule: React.FC = () => {
                         <div className="text-sm font-bold text-white">GM Vikram Sen</div>
                         <div className="text-xs text-orange-400 font-medium">Head Coach • Masterclass Stream</div>
 
-                        {coachStreamStatus.mic_active ? (
+                        {coachStreamStatus.mic_active || (coachRemoteStream && coachRemoteStream.getAudioTracks().length > 0) ? (
                           <div className="flex items-center gap-1.5 h-5 mt-2">
                             <div className="flex items-center gap-0.5">
                               {audioWave.map((h, i) => (
@@ -1446,7 +1553,7 @@ export const ClassroomModule: React.FC = () => {
                         )}
 
                         <button
-                          onClick={() => webrtcService.announceStreamReady('webcam')}
+                          onClick={handleResyncAV}
                           className="mt-3 px-3 py-1 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white text-xs font-semibold transition border border-zinc-700 flex items-center gap-1.5"
                         >
                           <Radio className="w-3.5 h-3.5 text-orange-400 animate-pulse" /> Re-sync AV Feed
@@ -1458,7 +1565,7 @@ export const ClassroomModule: React.FC = () => {
                     <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 z-20">
                       <div className="px-2.5 py-0.5 rounded-full bg-black/70 backdrop-blur-md text-[10px] font-mono font-semibold text-emerald-400 flex items-center gap-1.5 border border-white/10">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                        {coachRemoteStream ? 'GM VIKRAM SEN (LIVE)' : 'COACH STAGE (CONNECTED)'}
+                        {coachHasVideo ? 'GM VIKRAM SEN (LIVE)' : 'COACH STAGE (CONNECTED)'}
                       </div>
                     </div>
 

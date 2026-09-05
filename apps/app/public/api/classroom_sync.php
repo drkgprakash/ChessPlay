@@ -175,6 +175,17 @@ if ($action === 'snapshot' && $method === 'GET') {
     $maxEventStmt->execute(['batch_id' => $batchId]);
     $maxEvent = $maxEventStmt->fetch();
 
+    // Fetch latest coach stream status
+    $streamStmt = $pdo->prepare("SELECT payload FROM classroom_events 
+                                WHERE batch_id = :batch_id AND event_type = 'stream_status' 
+                                ORDER BY id DESC LIMIT 1");
+    $streamStmt->execute(['batch_id' => $batchId]);
+    $latestStream = $streamStmt->fetch();
+    $streamStatus = null;
+    if ($latestStream && !empty($latestStream['payload'])) {
+        $streamStatus = json_decode($latestStream['payload'], true);
+    }
+
     echo json_encode([
         'status' => 'success',
         'session' => $session,
@@ -182,6 +193,7 @@ if ($action === 'snapshot' && $method === 'GET') {
         'my_student_id' => $myStudentId,
         'my_board' => $myBoard,
         'chat_messages' => $chatMessages,
+        'stream_status' => $streamStatus,
         'last_event_id' => (int)($maxEvent['max_id'] ?? 0)
     ]);
     exit;
@@ -493,6 +505,9 @@ if ($action === 'signal' && $method === 'POST') {
     $input = getJsonInput();
     $batchId = trim($input['batch_id'] ?? 'batch-01');
     $targetUserId = trim($input['target_user_id'] ?? '');
+    $fromUserId = !empty($input['from_user_id']) ? trim($input['from_user_id']) : $user['id'];
+    $fromUserName = !empty($input['from_user_name']) ? trim($input['from_user_name']) : $user['name'];
+    $fromUserRole = !empty($input['from_user_role']) ? trim($input['from_user_role']) : $user['role'];
     $signalType = trim($input['signal_type'] ?? '');
     $signalData = $input['signal_data'] ?? null;
 
@@ -506,14 +521,14 @@ if ($action === 'signal' && $method === 'POST') {
     $insStmt->execute([
         'session_id' => $sessionId,
         'batch_id' => $batchId,
-        'user_id' => $user['id'],
-        'user_name' => $user['name'],
-        'user_role' => $user['role'],
+        'user_id' => $fromUserId,
+        'user_name' => $fromUserName,
+        'user_role' => $fromUserRole,
         'payload' => json_encode([
             'target_user_id' => $targetUserId,
-            'from_user_id' => $user['id'],
-            'from_user_name' => $user['name'],
-            'from_user_role' => $user['role'],
+            'from_user_id' => $fromUserId,
+            'from_user_name' => $fromUserName,
+            'from_user_role' => $fromUserRole,
             'signal_type' => $signalType,
             'signal_data' => $signalData
         ])
@@ -534,6 +549,7 @@ if ($action === 'stream_status' && $method === 'POST') {
     $micActive = !empty($input['mic_active']) ? 1 : 0;
     $screenActive = !empty($input['screen_active']) ? 1 : 0;
     $streamType = trim($input['stream_type'] ?? 'webcam');
+    $streamUserId = !empty($input['user_id']) ? trim($input['user_id']) : $user['id'];
 
     $sessionStmt = $pdo->prepare("SELECT id FROM classroom_sessions WHERE batch_id = :batch_id AND status = 'active' LIMIT 1");
     $sessionStmt->execute(['batch_id' => $batchId]);
@@ -545,11 +561,11 @@ if ($action === 'stream_status' && $method === 'POST') {
     $insStmt->execute([
         'session_id' => $sessionId,
         'batch_id' => $batchId,
-        'user_id' => $user['id'],
+        'user_id' => $streamUserId,
         'user_name' => $user['name'],
         'user_role' => $user['role'],
         'payload' => json_encode([
-            'user_id' => $user['id'],
+            'user_id' => $streamUserId,
             'user_name' => $user['name'],
             'role' => $user['role'],
             'cam_active' => $camActive,
