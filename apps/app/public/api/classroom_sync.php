@@ -596,11 +596,20 @@ if ($action === 'stream_status' && $method === 'POST') {
 // Uploads a PDF document to present in the live classroom
 // ---------------------------------------------------------
 if ($action === 'upload_pdf' && $method === 'POST') {
-    $batchId = trim($_POST['batch_id'] ?? 'batch-01');
+    $batchId = trim($_POST['batch_id'] ?? ($_GET['batch_id'] ?? 'batch-01'));
 
     if (!isset($_FILES['pdf_file']) || $_FILES['pdf_file']['error'] !== UPLOAD_ERR_OK) {
+        $errCode = $_FILES['pdf_file']['error'] ?? 'NO_FILE';
+        $errMsg = 'No valid PDF file received';
+        if ($errCode === UPLOAD_ERR_INI_SIZE || $errCode === UPLOAD_ERR_FORM_SIZE) {
+            $errMsg = 'The uploaded file exceeds the maximum upload limit configured on the server.';
+        } elseif ($errCode === UPLOAD_ERR_PARTIAL) {
+            $errMsg = 'The upload was interrupted. Please try again.';
+        } elseif ($errCode === UPLOAD_ERR_NO_FILE) {
+            $errMsg = 'No file was selected for upload.';
+        }
         http_response_code(400);
-        echo json_encode(['status' => 'error', 'message' => 'No valid PDF file uploaded']);
+        echo json_encode(['status' => 'error', 'message' => $errMsg, 'error_code' => $errCode]);
         exit;
     }
 
@@ -608,7 +617,7 @@ if ($action === 'upload_pdf' && $method === 'POST') {
     $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
     if ($ext !== 'pdf') {
         http_response_code(400);
-        echo json_encode(['status' => 'error', 'message' => 'Only PDF files are supported']);
+        echo json_encode(['status' => 'error', 'message' => 'Only PDF files (.pdf) are supported']);
         exit;
     }
 
@@ -616,6 +625,7 @@ if ($action === 'upload_pdf' && $method === 'POST') {
     if (!is_dir($uploadDir)) {
         @mkdir($uploadDir, 0777, true);
     }
+    @chmod($uploadDir, 0777);
 
     $cleanName = preg_replace('/[^a-zA-Z0-9_-]/', '_', pathinfo($file['name'], PATHINFO_FILENAME));
     $fileName = 'pdf_' . date('Ymd_His') . '_' . substr(md5(uniqid()), 0, 8) . '_' . $cleanName . '.pdf';
@@ -623,7 +633,7 @@ if ($action === 'upload_pdf' && $method === 'POST') {
 
     if (!move_uploaded_file($file['tmp_name'], $targetPath)) {
         http_response_code(500);
-        echo json_encode(['status' => 'error', 'message' => 'Failed to save uploaded PDF file']);
+        echo json_encode(['status' => 'error', 'message' => 'Failed to save uploaded PDF file to server storage']);
         exit;
     }
 
@@ -632,7 +642,23 @@ if ($action === 'upload_pdf' && $method === 'POST') {
     $sessionStmt = $pdo->prepare("SELECT id FROM classroom_sessions WHERE batch_id = :batch_id AND status = 'active' LIMIT 1");
     $sessionStmt->execute(['batch_id' => $batchId]);
     $session = $sessionStmt->fetch();
-    $sessionId = $session['id'] ?? 'session-01';
+    if (!$session) {
+        $newSessionId = 'session-' . substr(md5($batchId), 0, 8);
+        try {
+            $insSession = $pdo->prepare("INSERT INTO classroom_sessions (id, batch_id, academy_id, coach_id, title, master_fen, is_locked)
+                                         VALUES (:id, :batch_id, :acad, :coach, 'Live Masterclass Lecture', 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', 0)
+                                         ON DUPLICATE KEY UPDATE updated_at = NOW()");
+            $insSession->execute([
+                'id' => $newSessionId,
+                'batch_id' => $batchId,
+                'acad' => $user['academy_id'] ?? 'acad-001',
+                'coach' => $user['id'] ?? 'usr-headcoach'
+            ]);
+        } catch (Exception $e) {}
+        $sessionId = $newSessionId;
+    } else {
+        $sessionId = $session['id'];
+    }
 
     $payload = [
         'url' => $fileUrl,
@@ -640,7 +666,7 @@ if ($action === 'upload_pdf' && $method === 'POST') {
         'size' => $file['size'],
         'current_page' => 1,
         'is_presenting' => true,
-        'uploaded_by' => $user['name']
+        'uploaded_by' => $user['name'] ?? 'Coach'
     ];
 
     $insStmt = $pdo->prepare("INSERT INTO classroom_events (session_id, batch_id, user_id, user_name, user_role, event_type, payload) 
@@ -648,9 +674,9 @@ if ($action === 'upload_pdf' && $method === 'POST') {
     $insStmt->execute([
         'session_id' => $sessionId,
         'batch_id' => $batchId,
-        'user_id' => $user['id'],
-        'user_name' => $user['name'],
-        'user_role' => $user['role'],
+        'user_id' => $user['id'] ?? 'usr-headcoach',
+        'user_name' => $user['name'] ?? 'GM Vikram Sen',
+        'user_role' => $user['role'] ?? 'head_coach',
         'payload' => json_encode($payload)
     ]);
 

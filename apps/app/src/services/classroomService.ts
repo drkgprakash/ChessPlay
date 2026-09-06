@@ -371,28 +371,39 @@ export const classroomService = {
    */
   async uploadPdf(batchId: string, file: File, token: string | null): Promise<{ status: string; file_url?: string; file_name?: string; pdf_presentation?: any; message?: string }> {
     try {
+      const effectiveToken = token || (typeof window !== 'undefined' ? localStorage.getItem('chessplay_auth_token') : null);
       const formData = new FormData();
       formData.append('batch_id', batchId);
       formData.append('pdf_file', file);
 
       const headers: Record<string, string> = {};
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
+      if (effectiveToken) {
+        headers['Authorization'] = `Bearer ${effectiveToken}`;
       }
 
-      const res = await fetch(`${API_BASE}?action=upload_pdf`, {
+      const res = await fetch(`${API_BASE}?action=upload_pdf&batch_id=${encodeURIComponent(batchId)}`, {
         method: 'POST',
         headers,
         body: formData
       });
 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        return { status: 'error', message: errData.message || 'Upload failed' };
+      const text = await res.text();
+      let json: any;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        return {
+          status: 'error',
+          message: res.ok ? 'Unexpected response format from server' : `Server returned error (${res.status}): ${text.slice(0, 120)}`
+        };
       }
-      return await res.json();
+
+      if (!res.ok) {
+        return { status: 'error', message: json.message || `Upload failed with HTTP ${res.status}` };
+      }
+      return json;
     } catch (err: any) {
-      return { status: 'error', message: err.message || 'Network error' };
+      return { status: 'error', message: err.message || 'Network error while uploading PDF' };
     }
   },
 

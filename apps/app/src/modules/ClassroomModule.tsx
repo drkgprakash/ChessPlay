@@ -1260,27 +1260,28 @@ export const ClassroomModule: React.FC = () => {
   // PDF Presentation Handlers
   const handleTriggerPdfUpload = () => {
     if (pdfInputRef.current) {
+      pdfInputRef.current.value = '';
       pdfInputRef.current.click();
     }
   };
 
-  const handlePdfFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handleProcessPdfFile = async (file: File) => {
     if (!file) return;
 
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
-      alert('Please upload a valid PDF document.');
+    if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
+      alert('Please upload a valid PDF document (.pdf).');
       return;
     }
 
     if (file.size > 25 * 1024 * 1024) {
-      alert('PDF file is too large (maximum 25MB).');
+      alert('PDF file is too large. Maximum supported size is 25MB.');
       return;
     }
 
     setPdfUploading(true);
     try {
-      const res = await classroomService.uploadPdf(batchId, file, token);
+      const activeToken = token || (typeof window !== 'undefined' ? localStorage.getItem('chessplay_auth_token') : null);
+      const res = await classroomService.uploadPdf(batchId, file, activeToken);
       if (res.status === 'success' && res.pdf_presentation) {
         setPdfPresentation(res.pdf_presentation);
         setActiveTab('pdf');
@@ -1294,7 +1295,14 @@ export const ClassroomModule: React.FC = () => {
       alert('Error uploading PDF document: ' + (err.message || 'Network error'));
     } finally {
       setPdfUploading(false);
-      if (e.target) e.target.value = '';
+      if (pdfInputRef.current) pdfInputRef.current.value = '';
+    }
+  };
+
+  const handlePdfFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleProcessPdfFile(file);
     }
   };
 
@@ -1385,6 +1393,27 @@ export const ClassroomModule: React.FC = () => {
 
   return (
     <div className="flex flex-col gap-6 max-w-7xl mx-auto pb-12">
+      {/* Hidden Persistent PDF Input for Entire Classroom Lifecycle */}
+      <input
+        type="file"
+        ref={pdfInputRef}
+        onChange={handlePdfFileSelected}
+        accept=".pdf,application/pdf"
+        className="hidden"
+      />
+
+      {/* Uploading Spinner Overlay */}
+      {pdfUploading && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex flex-col items-center justify-center p-6 text-center animate-in fade-in">
+          <div className="w-14 h-14 rounded-2xl bg-orange-500/20 border border-orange-500/40 text-orange-400 flex items-center justify-center mb-3 shadow-lg shadow-orange-500/10">
+            <Upload className="w-7 h-7 animate-bounce text-orange-400" />
+          </div>
+          <h3 className="text-base font-bold text-white mb-1">Uploading Lecture PDF...</h3>
+          <p className="text-xs text-zinc-400 max-w-xs">
+            Preparing your presentation and synchronizing pages across all connected classroom screens.
+          </p>
+        </div>
+      )}
       {/* ========================================================= */}
       {/* 1. Classroom Header & Global Control Bar                  */}
       {/* ========================================================= */}
@@ -1641,13 +1670,6 @@ export const ClassroomModule: React.FC = () => {
                           <span>{pdfUploading ? 'Uploading...' : 'Share PDF 📄'}</span>
                         </button>
                       )}
-                      <input
-                        type="file"
-                        ref={pdfInputRef}
-                        onChange={handlePdfFileSelected}
-                        accept=".pdf,application/pdf"
-                        className="hidden"
-                      />
                       <button
                         onClick={() => setShowStudyModal(true)}
                         className="px-3 py-1.5 rounded-xl bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5"
@@ -1763,24 +1785,45 @@ export const ClassroomModule: React.FC = () => {
                     />
                   </div>
                 ) : (
-                  <div className="w-full h-[400px] rounded-2xl border-2 border-dashed border-zinc-800 bg-zinc-950/50 flex flex-col items-center justify-center p-6 text-center">
-                    <div className="w-16 h-16 rounded-2xl bg-orange-500/10 text-orange-400 flex items-center justify-center mb-3">
+                  <div 
+                    onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (isCoach && e.dataTransfer.files?.[0]) {
+                        handleProcessPdfFile(e.dataTransfer.files[0]);
+                      }
+                    }}
+                    onClick={() => {
+                      if (isCoach && !pdfUploading) handleTriggerPdfUpload();
+                    }}
+                    className={`w-full h-[400px] rounded-2xl border-2 border-dashed transition flex flex-col items-center justify-center p-6 text-center ${
+                      isCoach 
+                        ? 'border-zinc-700 hover:border-orange-500/70 bg-zinc-950/50 hover:bg-zinc-900/40 cursor-pointer group' 
+                        : 'border-zinc-800 bg-zinc-950/40'
+                    }`}
+                  >
+                    <div className="w-16 h-16 rounded-2xl bg-orange-500/10 text-orange-400 flex items-center justify-center mb-3 group-hover:scale-110 transition-transform shadow-inner">
                       <FileText className="w-8 h-8" />
                     </div>
                     <h4 className="text-sm font-bold text-white mb-1">No PDF Document Shared Yet</h4>
                     <p className="text-xs text-zinc-400 max-w-sm mb-4">
                       {isCoach 
-                        ? 'Select and upload a chess study guide, tactic worksheet, or endgame book to present live.'
+                        ? 'Click anywhere or drag & drop a chess study guide, tactic worksheet, or endgame book (PDF up to 25MB) to present live.'
                         : 'GM Vikram Sen has not uploaded a lecture document yet. Please wait for the coach.'}
                     </p>
                     {isCoach && (
                       <button
-                        onClick={handleTriggerPdfUpload}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleTriggerPdfUpload();
+                        }}
                         disabled={pdfUploading}
-                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-orange-500/20 transition hover:from-orange-600 hover:to-amber-700"
+                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-orange-500/20 transition hover:from-orange-600 hover:to-amber-700 cursor-pointer"
                       >
                         <Upload className="w-4 h-4" />
-                        {pdfUploading ? 'Uploading Document...' : 'Upload Lecture PDF'}
+                        {pdfUploading ? 'Uploading Document...' : 'Select & Upload Lecture PDF'}
                       </button>
                     )}
                   </div>
